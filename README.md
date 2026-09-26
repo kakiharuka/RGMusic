@@ -118,6 +118,17 @@ tools/                          Build and icon-generation scripts
 LICENSES/                       Third-party license texts
 ```
 
+## Developer resources
+
+- [RGDS Plus development notes](docs/RGDS_PLUS_DEVELOPMENT_NOTES.md)
+- [AI-assisted development guide](docs/AI_ASSISTED_DEVELOPMENT.md)
+- [Device quirks and practical fixes](docs/DEVICE_QUIRKS_AND_FIXES.md)
+- [Architecture overview](docs/ARCHITECTURE.md)
+
+These documents collect practical findings from the target device, including
+display layout, input handling, mpv lifecycle, network behavior, packaging,
+and AI-assisted debugging.
+
 ## Status
 
 Current version: `r0.75`
