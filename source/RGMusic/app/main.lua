@@ -2,7 +2,8 @@ local Library = require("library")
 local Touch = require("touch_evdev")
 local Netease = require("netease")
 local Mpv = require("mpv")
-local APP_VERSION = "r0.75"
+local AudioRoute = require("audio_route")
+local APP_VERSION = "r0.76"
 local start_stream_ready, queue_online_art, queue_online_lyrics, prefetch_online_url
 local log_path, log_line, log_tail
 
@@ -1463,6 +1464,7 @@ function love.load()
     state.fonts.body, state.fonts.track = make_font(22), make_font(24)
     state.fonts.header, state.fonts.title = make_font(38), make_font(46)
     state.controls = require("controls")
+    state.audioRoute = AudioRoute.open()
     load_settings()
     state.paths = music_paths(); state.tracks = {}
     state.localUI = {tracks = state.tracks, selected = 1, scroll = 1}
@@ -1493,6 +1495,7 @@ function love.load()
 end
 function love.update(dt)
     state.time = state.time + dt
+    if state.audioRoute then state.audioRoute:poll() end
     process_scan(0.008)
     if state.online and state.online.client then
         state.online.client:update()
@@ -1647,6 +1650,7 @@ function love.gamepadpressed(joystick, button)
 end
 function love.quit()
     save_settings()
+    if state.audioRoute then state.audioRoute:close() end
     if state.touch then state.touch:close() end
     if state.online then
         for _, key in ipairs({"client", "artClient", "prefetchClient", "lyricClient"}) do

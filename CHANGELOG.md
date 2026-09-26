@@ -1,5 +1,9 @@
 # Changelog
 
+## r0.76
+
+- Added automatic PulseAudio routing when headphones are inserted or removed.
+
 ## r0.75
 
 - Fixed online playback stopping when mpv reached end-of-file and entered idle state.

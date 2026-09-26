@@ -101,7 +101,7 @@ Requirements:
 Build the backend and create an APPS package:
 
 ```powershell
-.\tools\build_apps_package.ps1 -Version r0.75
+.\tools\build_apps_package.ps1 -Version r0.76
 ```
 
 The script automatically builds the ARM64 backend when it is missing.
@@ -109,7 +109,7 @@ The script automatically builds the ARM64 backend when it is missing.
 The package is written to:
 
 ```text
-dist/RGMusic-APPS-r0.75.zip
+dist/RGMusic-APPS-r0.76.zip
 ```
 
 Development directories and generated files are excluded by `.gitignore`.
@@ -139,7 +139,7 @@ and AI-assisted debugging. Chinese versions use the `.zh-CN.md` suffix.
 
 ## Status
 
-Current version: `r0.75`
+Current version: `r0.76`
 
 The online API implementation can change or break when the upstream service changes. Contributions and compatibility fixes are welcome.
 

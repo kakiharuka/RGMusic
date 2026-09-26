@@ -101,7 +101,7 @@ Roms/APPS/RGMusic/music
 构建后端并生成 APPS 包：
 
 ```powershell
-.\tools\build_apps_package.ps1 -Version r0.75
+.\tools\build_apps_package.ps1 -Version r0.76
 ```
 
 缺少 ARM64 后端时，脚本会自动编译。
@@ -109,7 +109,7 @@ Roms/APPS/RGMusic/music
 输出目录：
 
 ```text
-dist/RGMusic-APPS-r0.75.zip
+dist/RGMusic-APPS-r0.76.zip
 ```
 
 开发目录、构建产物、账号、缓存和日志默认由 `.gitignore` 排除。
@@ -137,7 +137,7 @@ LICENSES/                       第三方许可证
 
 ## 版本状态
 
-当前版本：`r0.75`
+当前版本：`r0.76`
 
 在线接口可能随服务端变化而失效，欢迎提交兼容性修复和功能改进。
 
