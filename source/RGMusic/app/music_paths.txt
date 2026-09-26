@@ -1,0 +1,5 @@
+# One absolute music folder per line.
+# The launcher already adds these defaults:
+# /mnt/sdcard/Music
+# /mnt/mmc/Music
+# Add more folders here if your card uses a different layout.

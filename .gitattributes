@@ -1,0 +1,12 @@
+* text=auto
+*.lua text eol=lf
+*.go text eol=lf
+*.ps1 text eol=crlf
+*.sh text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.aarch64 binary
+*.png binary
+*.ttf binary

@@ -1,0 +1,36 @@
+# Build and release output
+dist/
+packaging/
+release/package-*/
+release/distribution-*/
+.tools/
+archive/
+references/
+preview/
+*.zip
+
+# Generated helper binaries
+source/RGMusic/app/bin/rgmusic-netease.aarch64
+source/RGMusic/app/bin/rgmusic-netease.exe
+
+# Local runtime data
+cookies.json
+account.json
+saves/
+cache/
+logs/
+*.log
+
+# Media and local test data
+*.mp3
+*.flac
+*.m4a
+*.wav
+*.ogg
+*.lrc
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.tmp

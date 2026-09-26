@@ -1,0 +1,37 @@
+name: Bug report
+description: Report a reproducible problem with RG Music.
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not include cookies, account metadata, QR codes, private keys, or personal music lists.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: RG Music version
+      placeholder: r0.75
+    validations:
+      required: true
+  - type: dropdown
+    id: playback
+    attributes:
+      label: Playback type
+      options:
+        - Local music
+        - NetEase Cloud Music
+        - Both
+    validations:
+      required: true

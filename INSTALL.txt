@@ -1,0 +1,83 @@
+RG Music 安装教程
+
+一、准备
+1. 将 RGDS Plus 关机。
+2. 取出 TF 卡，用读卡器连接电脑。
+3. 下载并解压 RGMusic-r0.75-Distribution.zip。
+
+二、安装
+把压缩包解压到 TF 卡的 Roms 目录：
+Roms
+├─ APPS
+│  ├─ RG Music.sh
+│  └─ RGMusic
+│     ├─ app
+│     └─ runtime
+└─ Imgs
+   └─ RG Music.png
+
+不要只复制 RG Music.sh，也不要改变 RGMusic 文件夹名称。
+
+三、启动
+1. 安全弹出 TF 卡。
+2. 插回 RGDS Plus，开机。
+3. 打开“应用 / APPS”。
+4. 选择 RG Music。
+
+四、本地音乐
+把 MP3、OGG 或 WAV 放到：
+/mnt/sdcard/Music
+/mnt/mmc/Music
+Roms/APPS/RGMusic/music
+
+封面可使用：
+- MP3 内嵌封面
+- cover.jpg
+- 与歌曲同名的 JPG/PNG
+- folder.jpg
+
+歌词使用与歌曲同名的 UTF-8 LRC：
+歌曲名.lrc
+
+五、网易云
+1. 下屏按 L1 选择本地，按 R1 选择网易云。
+2. 按 A 选择“扫码登录网易云”。
+3. 手机网易云音乐扫码并确认。
+4. 登录后可查看歌单和每日推荐。
+5. Cookie 保存在本机，账号仍有效时下次启动不需要重复扫码。
+
+六、按键
+A       确认/选择/进入
+X       播放选中歌曲
+Start   暂停/继续当前歌曲
+方向键  上下选择，左右调节音量
+L1/R1   切换本地和网易云
+L2/R2   上一首和下一首
+B       返回
+Home    退出
+
+七、常见问题
+1. 在线歌曲加载慢
+   - 第一首需要联网获取地址，通常需要几秒。
+   - 下一首会提前预取，通常更快。
+   - 必须安装 mpv；未检测到 mpv 时无法在线播放。
+
+2. 有歌但没有封面
+   - 检查歌曲目录是否有 cover.jpg。
+   - 或使用与歌曲同名的 JPG/PNG。
+   - 网易云封面会异步下载，播放后稍等。
+
+3. 网易云无法播放
+   - 检查账号登录是否有效。
+   - VIP、地区限制、下架或版权限制歌曲不会绕过。
+   - 部分歌曲网易云不会返回可播放地址。
+
+4. APPS 中看不到 RG Music
+   - 确认 Roms/APPS/RG Music.sh 存在。
+   - 确认 Roms/APPS/RGMusic/app/main.lua 存在。
+   - 重启掌机让 APPS 重新扫描。
+
+安全说明
+- 不要把 cookies.json 发给别人。
+- 不要在 RG Music 运行时拔卡或强制断电。
+- 发布包不包含 mpv，在线流式播放需要系统已安装 mpv。
