@@ -3,7 +3,7 @@ RG Music 安装教程
 一、准备
 1. 将 RGDS Plus 关机。
 2. 取出 TF 卡，用读卡器连接电脑。
-3. 下载并解压 RGMusic-r0.75-Distribution.zip。
+3. 下载并解压 RGMusic-r0.76-Distribution.zip。
 
 二、安装
 把压缩包解压到 TF 卡的 Roms 目录：
