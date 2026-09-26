@@ -1,5 +1,7 @@
 # RG Music
 
+[简体中文](README.zh-CN.md) | English
+
 RG Music is a lightweight dual-screen music player designed for the Anbernic RGDS Plus and similar ARM64 Linux handhelds.
 
 The upper screen shows cover art and synchronized lyrics. The lower screen provides the local library, online playlists, playback controls, progress, and volume controls.
@@ -127,7 +129,7 @@ LICENSES/                       Third-party license texts
 
 These documents collect practical findings from the target device, including
 display layout, input handling, mpv lifecycle, network behavior, packaging,
-and AI-assisted debugging.
+and AI-assisted debugging. Chinese versions use the `.zh-CN.md` suffix.
 
 ## Status
 
