@@ -2,7 +2,13 @@
 
 [简体中文](README.zh-CN.md) | English
 
-RG Music is a lightweight dual-screen music player designed for the Anbernic RGDS Plus and similar ARM64 Linux handhelds.
+RG Music is a lightweight dual-screen music player developed and tested **only on the Anbernic RGDS Plus**. Compatibility with other handhelds has not been verified.
+
+## Compatibility
+
+- Verified device: Anbernic RGDS Plus
+- Other ARM64 Linux handhelds: unverified
+- Do not assume that display order, input devices, audio sockets, suspend behavior, or launcher paths are identical on another device.
 
 The upper screen shows cover art and synchronized lyrics. The lower screen provides the local library, online playlists, playback controls, progress, and volume controls.
 
@@ -123,7 +129,7 @@ LICENSES/                       Third-party license texts
 ## Developer resources
 
 - [RGDS Plus development notes](docs/RGDS_PLUS_DEVELOPMENT_NOTES.md)
-- [AI-assisted development guide](docs/AI_ASSISTED_DEVELOPMENT.md)
+- [AI reference guide for building other applications](docs/AI_ASSISTED_DEVELOPMENT.md)
 - [Device quirks and practical fixes](docs/DEVICE_QUIRKS_AND_FIXES.md)
 - [Architecture overview](docs/ARCHITECTURE.md)
 

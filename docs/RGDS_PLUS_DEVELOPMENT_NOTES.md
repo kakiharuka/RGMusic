@@ -2,6 +2,8 @@
 
 This document records practical observations from developing a native dual-screen application for the Anbernic RGDS Plus. Treat the exact paths, devices, and firmware behavior as a starting point, and always verify them on the target device.
 
+> Compatibility scope: the observations below were made on RGDS Plus only. They are not a claim that another handheld model shares the same hardware, firmware, input devices, audio stack, or launcher behavior.
+
 ## Target profile
 
 - Architecture: `aarch64`

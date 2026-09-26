@@ -2,6 +2,8 @@
 
 RG Music 分为客户端和 Go 后端两部分。
 
+> 兼容范围：该架构仅在 RGDS Plus 上开发和测试，不代表其他掌机具有相同的目录结构或运行行为。
+
 ## LÖVE 客户端
 
 源码位于 `source/RGMusic/app`。

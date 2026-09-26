@@ -2,6 +2,8 @@
 
 RG Music is split into two parts.
 
+> Compatibility scope: this architecture was developed and tested only on RGDS Plus. It is not a claim that the same layout or runtime behavior applies to other handhelds.
+
 ## LÖVE client
 
 The client lives in `source/RGMusic/app`.

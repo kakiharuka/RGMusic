@@ -2,6 +2,8 @@
 
 This page records symptoms and fixes that were useful while porting RG Music to the RGDS Plus.
 
+> These are observations from one tested device line. Other handhelds may use different event devices, audio services, suspend policies, network stacks, or filesystems. Treat every fix as a hypothesis until it is verified on the target device.
+
 ## Wi-Fi periodically stops responding
 
 Symptoms:
