@@ -3,6 +3,10 @@
 ## r0.76
 
 - Added automatic PulseAudio routing when headphones are inserted or removed.
+- Redesigned the dual-screen interface with a light flat theme, aligned cover/lyrics layout, centered transport controls, and clearer playback status icons.
+- Added NetEase membership-state display, account switching, and clearer handling of stale login sessions.
+- Improved unavailable-track handling: songs without a playable URL now show a clear message and are not repeatedly requested.
+- Refined the lower-screen layout, volume controls, shuffle/repeat indicators, and footer hints.
 
 ## r0.75
 

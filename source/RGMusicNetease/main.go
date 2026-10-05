@@ -47,7 +47,7 @@ func main() {
 			fail(err)
 		}
 		if account.LoggedIn {
-			fmt.Printf("logged_in\t%s\t%d\n", neteaseField(account.Nickname), account.UID)
+			fmt.Printf("logged_in\t%s\t%d\t%d\t%d\t%d\n", neteaseField(account.Nickname), account.UID, account.VipType, account.RedVipLevel, account.VipLevel)
 		} else {
 			fmt.Println("logged_out\t\t0")
 		}
@@ -62,7 +62,7 @@ func main() {
 		if err != nil {
 			fail(err)
 		}
-		fmt.Printf("%s\t%s\t%s\t%d\n", poll.State, neteaseField(poll.Message), neteaseField(poll.Account.Nickname), poll.Account.UID)
+		fmt.Printf("%s\t%s\t%s\t%d\t%d\t%d\t%d\n", poll.State, neteaseField(poll.Message), neteaseField(poll.Account.Nickname), poll.Account.UID, poll.Account.VipType, poll.Account.RedVipLevel, poll.Account.VipLevel)
 	case "playlists":
 		items, err := client.Playlists()
 		if err != nil {

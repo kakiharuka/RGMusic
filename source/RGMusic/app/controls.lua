@@ -1,7 +1,7 @@
 -- RG Music button mapping.
 -- Edit this file to change controls without modifying main.lua.
 -- Keyboard entries are kept only for desktop debugging; RGDSplus uses gamepad.
--- Actions: play_pause, play_selected, previous, next, volume_down, volume_up,
+-- Actions: play_pause, previous, next, volume_down, volume_up, favorite, more,
 -- shuffle, repeat_track, scroll_up, scroll_down,
 -- select_previous, select_next, activate, rescan, back, quit,
 -- section_local, section_online.
@@ -11,7 +11,8 @@ return {
         space = "play_pause",
         n = "next",
         p = "previous",
-        x = "play_selected",
+        x = "favorite",
+        y = "more",
         l = "section_local",
         r = "section_online",
         s = "shuffle",
@@ -27,7 +28,8 @@ return {
     },
     gamepad = {
         a = "activate",
-        x = "play_selected",
+        x = "favorite",
+        y = "more",
         start = "play_pause",
         b = "back",
         leftshoulder = "section_local",
@@ -44,7 +46,8 @@ return {
     joystick = {
         [0] = "activate",
         [1] = "back",
-        [3] = "play_selected",
+        [2] = "more",
+        [3] = "favorite",
         [4] = "section_local",
         [5] = "section_online",
         [6] = "back",

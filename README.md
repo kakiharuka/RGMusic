@@ -23,6 +23,7 @@ The upper screen shows cover art and synchronized lyrics. The lower screen provi
 - Touchscreen, gamepad, keyboard, and volume-slider input
 - Shuffle, repeat-track, and playback-position persistence
 - No runtime log files by default
+- Account membership status display and re-login/account switching
 
 The project is unofficial and is not affiliated with NetEase Cloud Music. It does not provide music content or bypass VIP, region, purchase, or copyright restrictions. Online playback depends on the account and on the service returning a playable URL.
 
@@ -77,16 +78,16 @@ Lyrics lookup:
 | Button | Action |
 |---|---|
 | A | Confirm, select, enter |
-| X | Play selected track |
-| Start | Pause/resume current track |
+| X | Favorite or unfavorite selected track |
+| Start | Play selected track; pause/resume current track |
 | D-pad up/down | Move selection |
 | D-pad left/right | Volume down/up by 10% |
 | L1 | Local library |
 | R1 | NetEase Cloud Music |
 | L2 | Previous track |
 | R2 | Next track |
-| B | Back |
-| Y | Unused |
+| B | Back; cancel loading |
+| Y | Retry failed playback; cancel loading |
 | Home | Exit |
 
 ## Building from source
@@ -110,6 +111,18 @@ The package is written to:
 
 ```text
 dist/RGMusic-APPS-r0.76.zip
+```
+
+Build the full distribution archive, which also includes the installation guide and licenses:
+
+```powershell
+.\tools\build_distribution.ps1 -Version r0.76
+```
+
+Output:
+
+```text
+dist/RGMusic-r0.76-Distribution.zip
 ```
 
 Development directories and generated files are excluded by `.gitignore`.

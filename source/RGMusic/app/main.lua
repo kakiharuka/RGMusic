@@ -4,6 +4,7 @@ local Netease = require("netease")
 local Mpv = require("mpv")
 local AudioRoute = require("audio_route")
 local APP_VERSION = "r0.76"
+local STREAM_UNAVAILABLE_MESSAGE = "此歌曲无可用播放源：可能受版权、地区或会员权益限制"
 local start_stream_ready, queue_online_art, queue_online_lyrics, prefetch_online_url
 local log_path, log_line, log_tail
 
@@ -13,24 +14,26 @@ local LOWER_X = 1024
 local VISIBLE_ROWS = 6
 
 local C = {
-    bg = {0.94, 0.95, 0.975, 1},
-    upper = {0.975, 0.98, 0.995, 1},
-    lower = {0.915, 0.93, 0.96, 1},
+    bg = {0.952, 0.963, 0.982, 1},
+    upper = {0.982, 0.986, 0.997, 1},
+    lower = {0.941, 0.951, 0.973, 1},
     card = {1.0, 1.0, 1.0, 1},
-    card2 = {0.94, 0.96, 0.985, 1},
-    card3 = {0.89, 0.92, 0.965, 1},
-    text = {0.075, 0.09, 0.125, 1},
-    muted = {0.39, 0.43, 0.51, 1},
-    accent = {0.27, 0.48, 0.94, 1},
-    accent2 = {0.91, 0.31, 0.36, 1},
-    line = {0.80, 0.83, 0.89, 1},
-    dark = {0.05, 0.07, 0.10, 1},
-    ok = {0.10, 0.67, 0.48, 1},
+    card2 = {0.925, 0.946, 0.984, 1},
+    card3 = {0.865, 0.891, 0.938, 1},
+    text = {0.082, 0.102, 0.148, 1},
+    muted = {0.405, 0.445, 0.525, 1},
+    accent = {0.18, 0.43, 0.91, 1},
+    accent2 = {0.91, 0.30, 0.37, 1},
+    line = {0.825, 0.855, 0.91, 1},
+    dark = {0.045, 0.06, 0.09, 1},
+    ok = {0.08, 0.65, 0.46, 1},
 }
 
 local state = {
     tracks = {}, selected = 1, playing = false, position = 0, duration = 0,
-    masterVolume = 0.5, muted = false,
+    masterVolume = 0.5, speakerVolume = 0.5, headphoneVolume = 0.5, output = "speaker", muted = false,
+    playbackState = "idle", playbackTrack = nil, playbackError = nil,
+    loadingStartedAt = 0, loadingStage = nil, trackStatus = {}, favorites = {},
     shuffle = false, repeatTrack = false,
     time = 0, scroll = 1, status = "正在启动音乐库...",
     scanActive = false, scanTracks = {}, scanCount = 0, scanRoot = "",
@@ -62,6 +65,9 @@ local function rounded_panel(x, y, w, h, fill, radius)
     color(fill)
     love.graphics.rectangle("fill", x, y, w, h, radius or 18, radius or 18)
 end
+local function soft_panel(x, y, w, h, fill, radius, strength)
+    rounded_panel(x, y, w, h, fill, radius or 18)
+end
 local function clamp(v, low, high) return math.max(low, math.min(high, v)) end
 local function fmt_time(seconds)
     seconds = math.max(0, math.floor(seconds or 0))
@@ -69,7 +75,7 @@ local function fmt_time(seconds)
 end
 local function quantize_volume(value)
     value = clamp(value or 0, 0, 1)
-    return math.floor(value * 10 + 0.5) / 10
+    return math.floor(value * 20 + 0.5) / 20
 end
 
 local function effective_volume()
@@ -81,6 +87,94 @@ local function current_track()
     if track then return track end
     return {title = "没有找到本地音乐", artist = "请将音乐放入扫描目录", album = "", duration = 0, extension = "", palette = {{0.12,0.22,0.42},{0.18,0.84,0.69},{0.96,0.42,0.31}}}
 end
+local function track_key(track)
+    if not track then return nil end
+    if track.id then return "id:" .. tostring(track.id) end
+    if track.path and track.path ~= "" then return "path:" .. tostring(track.path) end
+    return "title:" .. tostring(track.title or track.name or "")
+end
+
+local function same_track(left, right)
+    if not left or not right then return false end
+    if left.id and right.id then return tostring(left.id) == tostring(right.id) end
+    if left.path and right.path then return left.path == right.path end
+    return false
+end
+
+local function set_track_status(track, status, detail)
+    local key = track_key(track)
+    if not key then return end
+    state.trackStatus[key] = {status = status, detail = detail, at = love.timer.getTime()}
+end
+
+local function get_track_status(track)
+    local key = track_key(track)
+    if key and state.trackStatus[key] then
+        return state.trackStatus[key].status, state.trackStatus[key].detail
+    end
+    if same_track(track, state.playbackTrack) then
+        return state.playbackState, state.playbackError
+    end
+    return "idle", nil
+end
+
+local function set_playback_state(value, track, detail)
+    if state.playbackTrack and track and not same_track(state.playbackTrack, track) then
+        local oldStatus = get_track_status(state.playbackTrack)
+        local oldStillPlaying = same_track(state.playbackTrack, state.nowPlaying) and state.streaming and state.mpv and state.mpv:is_active()
+        if not oldStillPlaying and (oldStatus == "playing" or oldStatus == "paused" or oldStatus == "loading" or oldStatus == "starting" or oldStatus == "buffering" or oldStatus == "resolving") then
+            set_track_status(state.playbackTrack, "idle", nil)
+        end
+    end
+    state.playbackState = value or "idle"
+    state.playbackTrack = track
+    state.playbackError = value == "failed" and detail or nil
+    state.loadingStage = (value == "resolving" or value == "loading" or value == "starting" or value == "buffering") and value or nil
+    if value == "resolving" or value == "loading" or value == "starting" then
+        state.loadingStartedAt = love.timer.getTime()
+    end
+    if track then set_track_status(track, state.playbackState, detail) end
+end
+
+local function load_favorites()
+    state.favorites = {}
+    local data = love.filesystem.read("favorites.txt")
+    if not data then return end
+    for line in data:gmatch("[^\r\n]+") do state.favorites[line] = true end
+end
+
+local function save_favorites()
+    local keys = {}
+    for key in pairs(state.favorites) do keys[#keys + 1] = key end
+    table.sort(keys)
+    love.filesystem.write("favorites.txt", table.concat(keys, "\n") .. "\n")
+end
+
+local function is_favorite(track)
+    local key = track_key(track)
+    return key ~= nil and state.favorites[key] == true
+end
+
+local function set_user_status(message)
+    state.status = message
+    if state.online then state.online.status = message end
+end
+
+local function toggle_favorite()
+    local track = state.tracks[state.selected] or current_track()
+    if not track or (track.kind and track.kind ~= "track") then return end
+    local key = track_key(track)
+    if not key then return end
+    if state.favorites[key] then
+        state.favorites[key] = nil
+        set_user_status("已取消收藏：" .. tostring(track.title or track.name or ""))
+    else
+        state.favorites[key] = true
+        set_user_status("已收藏：" .. tostring(track.title or track.name or ""))
+    end
+    save_favorites()
+end
+
 local function truncate(text, font, width)
     text = tostring(text or "")
     if font:getWidth(text) <= width then return text end
@@ -249,7 +343,7 @@ end
 
 local function apply_source_volume()
     if state.source then state.source:setVolume(effective_volume()) end
-    if state.streaming and state.mpv then state.mpv:set_volume(state.muted and 0 or state.masterVolume) end
+    if state.streaming and state.mpv then state.mpv:set_volume(effective_volume()) end
 end
 local function stop_source()
     if state.mpv and state.mpv:is_active() then state.mpv:stop() end
@@ -258,7 +352,11 @@ local function stop_source()
     state.source, state.fileData, state.audioReady, state.playbackConfirmed = nil, nil, false, false
 end
 local function load_source_for_track(track)
+    if state.nowPlaying and not same_track(state.nowPlaying, track) then
+        set_track_status(state.nowPlaying, "idle", nil)
+    end
     stop_source()
+    set_playback_state("loading", track, "正在加载：" .. tostring(track.title or track.filename or ""))
     load_cover(track)
     load_lyrics(track)
     state.advanceGuardUntil = 0
@@ -269,7 +367,8 @@ local function load_source_for_track(track)
         state.position, state.playing, state.audioReady, state.playbackConfirmed, state.streaming = 0, false, false, false, true
         state.mpvStartedAt, state.mpvStatusAt, state.mpvEofHandled = state.time, state.time, false
         state.mpvProgressAt, state.mpvLastPosition = state.time, 0
-        local playOk, playErr = pcall(state.mpv.play, state.mpv, track.streamURL, state.muted and 0 or state.masterVolume)
+        set_playback_state("starting", track, "正在启动播放：" .. tostring(track.title or ""))
+        local playOk, playErr = pcall(state.mpv.play, state.mpv, track.streamURL, effective_volume())
         if not playOk then
             state.streaming, state.playing, state.audioReady, state.playbackConfirmed = false, false, false, false
             log_line("mpv", "start error: " .. tostring(playErr))
@@ -294,9 +393,19 @@ local function load_source_for_track(track)
     state.source, state.fileData = source, fileData
     state.duration = tonumber(source:getDuration()) or 0
     state.position, state.playing, state.audioReady, state.playbackConfirmed = 0, true, true, true
+    set_playback_state("playing", track, "正在播放：" .. tostring(track.title or ""))
     apply_source_volume()
     source:play()
     state.status = "正在播放：" .. track.title
+end
+local function start_track(track)
+    if not track then return end
+    local ok, err = pcall(load_source_for_track, track)
+    if not ok then
+        state.playing, state.audioReady, state.streaming = false, false, false
+        set_playback_state("failed", track, tostring(err))
+        set_user_status("播放失败：" .. tostring(err))
+    end
 end
 local function ensure_selected_visible()
     state.scroll = clamp(state.scroll, 1, math.max(1, #state.tracks - VISIBLE_ROWS + 1))
@@ -330,6 +439,7 @@ end
 
 local function apply_online_view()
     if not state.online then return end
+    if state.section ~= "online" then return end
     state.tracks = online_items()
     state.selected = state.online.selected
     state.scroll = state.online.scroll
@@ -367,8 +477,12 @@ local function set_section(section)
                 local row = rows[1] or {}
                 state.online.loggedIn = row[1] == "logged_in"
                 state.online.nickname, state.online.uid = row[2] or "", tonumber(row[3]) or 0
+                state.online.vipType = tonumber(row[4]) or 0
+                state.online.redVipLevel = tonumber(row[5]) or 0
+                state.online.vipLevel = tonumber(row[6]) or 0
+                state.online.member = state.online.vipType > 0 or state.online.redVipLevel > 0
                 if state.online.loggedIn then
-                    state.online.status = "已登录：" .. state.online.nickname
+            state.online.status = "已登录：" .. state.online.nickname .. (state.online.member and " | 会员权益已识别" or " | 当前账号未检测到会员权益")
                     refresh_playlists()
                 else
                     state.online.status = "登录后可同步歌单和每日推荐"
@@ -398,6 +512,7 @@ function refresh_playlists()
                 }
             end
         end
+        menu[#menu + 1] = {kind = "action", action = "logout", title = "退出当前账号", subtitle = "切换其他网易云账号"}
         state.online.menu = menu
         state.online.view = "menu"
         state.online.selected, state.online.scroll = 1, 1
@@ -431,6 +546,21 @@ function activate_online_item()
             state.online.started = false
             set_section("local")
             set_section("online")
+        elseif item.action == "logout" then
+            state.online.status = "正在退出登录..."
+            state.online.client:run("logout", {}, function(ok, _, output)
+                if not ok then
+                    state.online.status = "退出登录失败：" .. truncate(output, state.fonts.small, 300)
+                    return
+                end
+                state.online.loggedIn, state.online.nickname, state.online.uid = false, "", 0
+                state.online.vipType, state.online.redVipLevel, state.online.vipLevel, state.online.member = 0, 0, 0, false
+                state.online.view = "menu"
+                state.online.selected, state.online.scroll = 1, 1
+                state.online.menu = {{kind = "action", action = "login", title = "扫码登录网易云", subtitle = "使用手机网易云音乐扫码"}}
+                state.online.status = "已退出登录，请重新扫码"
+                apply_online_view()
+            end)
         elseif item.action == "daily" then
             state.online.status = "正在读取每日推荐..."
             state.online.client:run("playlist", {"daily"}, function(ok, rows, output)
@@ -516,6 +646,7 @@ end
 
 start_stream_ready = function(track, url, quality, kind)
     if not track or not url or url == "" then return end
+    set_playback_state("starting", track, "正在启动播放：" .. tostring(track.title or ""))
     state.online.pendingTrack = nil
     state.online.prepareID = nil; state.online.requestStartedAt = 0; state.online.requestStreaming = false
     state.online.streamRetryCount = 0
@@ -533,6 +664,7 @@ start_stream_ready = function(track, url, quality, kind)
     log_line("online", "ready mode=stream id=" .. tostring(track.id))
     local playOk, playErr = pcall(load_source_for_track, ready)
     if not playOk then
+        set_playback_state("failed", ready, tostring(playErr))
         state.status = "播放失败：" .. tostring(playErr)
         return
     end
@@ -605,6 +737,7 @@ prefetch_online_url = function(track)
     if not track or not state.online or not state.online.prefetchClient then return end
     if not state.mpv then return end
     local id = tostring(track.id)
+    if state.online.unplayable[id] then return end
     if cached_stream(track) then return end
     state.online.prefetchPending = track
     if state.online.prefetchClient:is_busy() then return end
@@ -637,12 +770,21 @@ end
 
 function prepare_online_track(track, forceRefresh)
     if not track or not state.online then return end
-    if not track.available then state.online.status = "歌曲当前不可播放"; return end
+    if not track.available then set_playback_state("failed", track, "歌曲当前不可播放"); state.online.status = "歌曲当前不可播放"; return end
     state.online.wantedGeneration = (state.online.wantedGeneration or 0) + 1
     local generation = state.online.wantedGeneration
     state.online.pendingTrack = track
     state.online.prepareID = tostring(track.id)
     local trackID = tostring(track.id)
+    if not forceRefresh and state.online.unplayable[trackID] then
+        state.online.pendingTrack = nil
+        state.online.prepareID = nil
+        set_playback_state("failed", track, STREAM_UNAVAILABLE_MESSAGE)
+        state.online.status = STREAM_UNAVAILABLE_MESSAGE
+        state.status = STREAM_UNAVAILABLE_MESSAGE
+        return
+    end
+    if forceRefresh then state.online.unplayable[trackID] = nil end
     if not state.online.requestTrack or tostring(state.online.requestTrack.id) ~= trackID then
         state.online.streamRetryCount = 0
     end
@@ -651,6 +793,7 @@ function prepare_online_track(track, forceRefresh)
 
     local streaming = state.mpv and state.mpv:available()
     if not streaming then
+        set_playback_state("failed", track, "在线播放不可用：未检测到 mpv")
         state.online.prepareID = nil
         state.online.pendingTrack = nil
         state.online.requestStartedAt = 0
@@ -675,6 +818,7 @@ function prepare_online_track(track, forceRefresh)
     end
     log_line("online", "request stream id=" .. trackID .. " generation=" .. tostring(generation))
     state.online.status = "正在获取播放地址：" .. track.title
+    set_playback_state("resolving", track, "正在获取播放地址：" .. tostring(track.title or ""))
     state.online.requestStartedAt = love.timer.getTime()
     state.online.requestStreaming = true
     state.online.client:run("stream", {trackID, "exhigh"}, function(ok, rows, output)
@@ -688,12 +832,15 @@ function prepare_online_track(track, forceRefresh)
         state.online.prepareID = nil; state.online.requestStartedAt = 0; state.online.requestStreaming = false
         state.online.pendingTrack = nil
         if not ok then
+            set_playback_state("failed", track, "获取播放地址失败")
             log_line("online", "request failed: " .. tostring(output))
             local errorText = tostring(output)
             local lowerError = errorText:lower()
             if lowerError:find("requires a valid netease membership", 1, true) or lowerError:find("song is unavailable", 1, true) then
-                state.online.status = "歌曲当前无法播放：" .. truncate(errorText, state.fonts.small, 240)
-                state.status = state.online.status
+                state.online.unplayable[trackID] = true
+                set_playback_state("failed", track, STREAM_UNAVAILABLE_MESSAGE)
+                state.online.status = STREAM_UNAVAILABLE_MESSAGE
+                state.status = STREAM_UNAVAILABLE_MESSAGE
                 return
             end
             retry_stream_playback("获取播放地址失败：" .. truncate(errorText, state.fonts.small, 240))
@@ -724,11 +871,13 @@ retry_stream_playback = function(reason)
     end
     local count = state.online.streamRetryCount or 0
     if count >= 1 then
+        set_playback_state("failed", track, reason or "播放失败")
         state.online.status = (reason or "播放失败") .. "，重试后仍然无法播放"
         state.status = state.online.status
         return
     end
     state.online.streamRetryCount = count + 1
+    set_playback_state("resolving", track, reason or "重新获取播放地址")
     state.online.status = (reason or "播放失败") .. string.format("，正在重新获取播放地址（%d/2）", count + 1)
     prepare_online_track(track, true)
 end
@@ -747,9 +896,13 @@ function poll_login()
         state.online.loginMessage = messageMap[state.online.loginState] or row[2] or "等待扫码"
         if state.online.loginState == "success" then
             state.online.loggedIn, state.online.nickname, state.online.uid = true, row[3] or "", tonumber(row[4]) or 0
+            state.online.vipType = tonumber(row[5]) or 0
+            state.online.redVipLevel = tonumber(row[6]) or 0
+            state.online.vipLevel = tonumber(row[7]) or 0
+            state.online.member = state.online.vipType > 0 or state.online.redVipLevel > 0
             state.online.qrImage = nil
             state.online.view = "menu"
-            state.online.status = "已登录：" .. state.online.nickname
+            state.online.status = "已登录：" .. state.online.nickname .. (state.online.member and " | 会员权益已识别" or " | 当前账号未检测到会员权益")
             refresh_playlists()
         elseif state.online.loginState ~= "expired" then
             state.online.pollAt = love.timer.getTime() + 1.5
@@ -782,13 +935,7 @@ local function select_track(index, autoplay)
         if autoplay then prepare_online_track(state.tracks[state.selected]) end
         return
     end
-    if autoplay then
-        local ok, err = pcall(load_source_for_track, state.tracks[state.selected] or state.tracks[1])
-        if not ok then
-            state.playing, state.audioReady = false, false
-            state.status = "播放失败：" .. tostring(err)
-        end
-    end
+    if autoplay then start_track(state.tracks[state.selected] or state.tracks[1]) end
 end
 local function selected_matches_playing()
     local selected, playing = state.tracks[state.selected], state.nowPlaying
@@ -798,34 +945,75 @@ local function selected_matches_playing()
     return false
 end
 
-local function toggle_play()
-    if state.streaming and state.mpv and state.mpv:is_active() then
-        if not state.audioReady then
-            state.status = "歌曲仍在加载，请稍候"
-            if state.online then state.online.status = state.status end
-            return
-        end
-        state.playing = not state.mpv:toggle_pause()
-    elseif state.source then
-        state.playing = not state.playing
-        if state.playing then state.source:play() else state.source:pause() end
-    else
-        state.status = "没有正在播放的歌曲"
-    end
+local play_selected
+local toggle_play
+
+local function loading_active()
+    return state.playbackState == "resolving" or state.playbackState == "loading" or state.playbackState == "starting" or state.playbackState == "buffering"
 end
 
-local function play_selected()
+local function cancel_loading()
+    if state.online then
+        state.online.wantedGeneration = (state.online.wantedGeneration or 0) + 1
+    end
+    if state.online and state.online.client and state.online.client:is_busy() then
+        state.online.client:cancel()
+    end
+    if state.online then
+        state.online.pendingTrack = nil
+        state.online.prepareID = nil
+        state.online.requestStartedAt = 0
+        state.online.requestStreaming = false
+    end
+    local target = state.playbackTrack
+    if target then set_track_status(target, "idle", nil) end
+    if state.streaming and state.mpv and state.mpv:is_active() and not state.audioReady then
+        state.mpv:stop()
+        state.streaming = false
+    end
+    if state.streaming and state.mpv and state.mpv:is_active() and state.audioReady then
+        set_playback_state(state.playing and "playing" or "paused", state.nowPlaying, nil)
+    else
+        state.streaming, state.playing, state.audioReady = false, false, false
+        state.playbackState, state.playbackTrack, state.playbackError = "idle", nil, nil
+    end
+    set_user_status("已取消加载")
+end
+
+play_selected = function()
     local selected = state.tracks[state.selected]
     if not selected then return end
-    if selected_matches_playing() then
+    if same_track(selected, state.nowPlaying) and state.audioReady then
         if not state.playing then toggle_play() end
         return
     end
     if state.section == "online" and state.online.view == "tracks" then
-        prepare_online_track(selected)
+        if state.playbackState == "failed" then state.online.streamRetryCount = 0 end
+        prepare_online_track(selected, state.playbackState == "failed")
     elseif state.section == "local" then
-        select_track(state.selected, true)
+        start_track(selected)
     end
+end
+
+toggle_play = function()
+    if loading_active() then cancel_loading(); return end
+    local selected = state.tracks[state.selected]
+    if selected and selected.kind ~= "action" and selected.kind ~= "playlist" and not same_track(selected, state.nowPlaying) then
+        play_selected()
+        return
+    end
+    if state.streaming and state.mpv and state.mpv:is_active() and state.audioReady then
+        state.playing = not state.mpv:toggle_pause()
+        set_playback_state(state.playing and "playing" or "paused", state.nowPlaying, nil)
+        return
+    end
+    if state.source then
+        state.playing = not state.playing
+        if state.playing then state.source:play() else state.source:pause() end
+        set_playback_state(state.playing and "playing" or "paused", state.nowPlaying, nil)
+        return
+    end
+    play_selected()
 end
 
 local function activate_selected()
@@ -835,12 +1023,9 @@ local function activate_selected()
     end
     select_track(state.selected, false)
     local selected = state.tracks[state.selected]
-    if selected then
-        if state.section == "online" and state.online.view == "tracks" then
-            state.online.status = "已选择：" .. tostring(selected.title) .. "  按 X 播放"
-        elseif state.section == "local" then
-            state.status = "已选择：" .. tostring(selected.title) .. "  按 X 播放"
-        end
+    if selected and selected.kind ~= "action" and selected.kind ~= "playlist" then
+        local message = "已选择：" .. tostring(selected.title or selected.name or "") .. "  按 Start 播放"
+        if state.section == "online" then state.online.status = message else state.status = message end
     end
 end
 
@@ -858,17 +1043,57 @@ local function next_track(delta)
         select_track(next_index, true)
     else select_track(state.selected + delta, true) end
 end
+local function current_output()
+    if state.audioRoute and state.audioRoute.is_headphones then
+        return state.audioRoute:is_headphones() and "headphone" or "speaker"
+    end
+    return state.output or "speaker"
+end
+
+local function volume_for_output(output)
+    return output == "headphone" and state.headphoneVolume or state.speakerVolume
+end
+
+local function store_current_volume()
+    if state.output == "headphone" then
+        state.headphoneVolume = state.masterVolume
+    else
+        state.speakerVolume = state.masterVolume
+    end
+end
+
+local save_settings
+
+local function sync_output_volume()
+    local output = current_output()
+    if output == state.output then return end
+    store_current_volume()
+    state.output = output
+    state.masterVolume = volume_for_output(output)
+    apply_source_volume()
+    save_settings()
+end
+
 local function load_settings()
     local data = love.filesystem.read("settings.txt")
-    if not data then return end
-    local volume, muted = data:match("master=([%d%.]+)%s*muted=(%d+)")
-    if volume then state.masterVolume = quantize_volume(tonumber(volume) or 0.5) end
+    state.output = current_output()
+    if not data then
+        state.masterVolume = volume_for_output(state.output)
+        return
+    end
+    local speaker, headphone, volume, muted = data:match("speaker=([%d%.]+)%s*headphone=([%d%.]+)%s*master=([%d%.]+)%s*muted=(%d+)")
+    if not speaker then volume, muted = data:match("master=([%d%.]+)%s*muted=(%d+)") end
+    local fallback = quantize_volume(tonumber(volume) or 0.5)
+    state.speakerVolume = quantize_volume(tonumber(speaker) or fallback)
+    state.headphoneVolume = quantize_volume(tonumber(headphone) or fallback)
+    state.masterVolume = volume_for_output(state.output)
     if muted then state.muted = muted == "1" end
     apply_source_volume()
 end
 
-local function save_settings()
-    love.filesystem.write("settings.txt", string.format("master=%.4f\nmuted=%d\n", state.masterVolume, state.muted and 1 or 0))
+save_settings = function()
+    store_current_volume()
+    love.filesystem.write("settings.txt", string.format("speaker=%.4f\nheadphone=%.4f\nmaster=%.4f\nmuted=%d\n", state.speakerVolume, state.headphoneVolume, state.masterVolume, state.muted and 1 or 0))
 end
 
 local function set_master_volume(value)
@@ -882,6 +1107,7 @@ local function adjust_master_volume(delta)
 end
 
 local function toggle_mute() state.muted = not state.muted; apply_source_volume(); save_settings() end
+
 local function seek_fraction(frac)
     if state.duration <= 0 then return end
     local seconds = state.duration * clamp(frac, 0, 1)
@@ -1036,6 +1262,11 @@ local function make_font(size)
     return love.graphics.newFont(size)
 end
 local function draw_cover_image(image, x, y, w, h, radius)
+    radius = radius or 18
+    love.graphics.stencil(function()
+        love.graphics.rectangle("fill", x, y, w, h, radius, radius)
+    end, "replace", 1)
+    love.graphics.setStencilTest("greater", 0)
     love.graphics.setColor(1, 1, 1, 1)
     local iw, ih = image:getDimensions()
     local scale = math.max(w / iw, h / ih)
@@ -1045,6 +1276,7 @@ local function draw_cover_image(image, x, y, w, h, radius)
     love.graphics.draw(image, x + (w - dw) / 2, y + (h - dh) / 2, 0, scale, scale)
     love.graphics.setScissor()
     if previous_scissor[1] then love.graphics.setScissor(unpack(previous_scissor)) end
+    love.graphics.setStencilTest()
 end
 local function draw_fallback_cover(track, x, y, size, radius)
     local p = track.palette or {{0.16,0.22,0.38},{0.35,0.58,0.96},{0.95,0.45,0.48}}
@@ -1055,24 +1287,40 @@ local function draw_fallback_cover(track, x, y, size, radius)
 end
 
 local function draw_cover(track, x, y, size, radius)
-    color({0.12, 0.16, 0.24, 0.11})
-    love.graphics.rectangle("fill", x, y + 6, size, size, radius or 18, radius or 18)
     if state.coverImage then draw_cover_image(state.coverImage, x, y, size, size, radius)
     else draw_fallback_cover(track, x, y, size, radius) end
+    color({1, 1, 1, 0.96})
+    love.graphics.setLineWidth(2)
+    love.graphics.rectangle("line", x - 1, y - 1, size + 2, size + 2, (radius or 18) + 1, (radius or 18) + 1)
+    love.graphics.setLineWidth(1)
 end
+local upperGradientMesh
+local upperGradientKey
+
 local function draw_upper_background()
-    if state.coverImage then
-        local iw, ih = state.coverImage:getDimensions()
-        local scale = math.max(SCREEN_W / iw, SCREEN_H / ih)
-        local dw, dh = iw * scale, ih * scale
-        love.graphics.setColor(1, 1, 1, 0.16)
-        love.graphics.draw(state.coverImage, (SCREEN_W - dw) / 2, (SCREEN_H - dh) / 2, 0, scale, scale)
-        color(C.upper, 0.86); love.graphics.rectangle("fill", 0, 0, SCREEN_W, SCREEN_H)
-    else
-        color(C.upper); love.graphics.rectangle("fill", 0, 0, SCREEN_W, SCREEN_H)
+    color(C.upper); love.graphics.rectangle("fill", 0, 0, SCREEN_W, SCREEN_H)
+    local a = accent()
+    local key = string.format("%.3f,%.3f,%.3f", a[1], a[2], a[3])
+    if key ~= upperGradientKey then
+        local vertices = {
+            {0, 0, 0, 0, a[1], a[2], a[3], 0.16},
+            {SCREEN_W, 0, 1, 0, a[1], a[2], a[3], 0.16},
+            {SCREEN_W, SCREEN_H, 1, 1, a[1], a[2], a[3], 0.012},
+            {0, SCREEN_H, 0, 1, a[1], a[2], a[3], 0.012}
+        }
+        if upperGradientMesh then
+            upperGradientMesh:setVertices(vertices)
+        else
+            upperGradientMesh = love.graphics.newMesh(vertices, "fan", "dynamic")
+        end
+        upperGradientKey = key
     end
-    color(accent(), 0.055); love.graphics.circle("fill", 110, 120, 300)
+    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.draw(upperGradientMesh)
+    color(C.card, 0.74); love.graphics.rectangle("fill", 0, 0, SCREEN_W, 3)
+    color(a, 0.12); love.graphics.rectangle("fill", 0, SCREEN_H - 3, SCREEN_W, 3)
 end
+
 local function draw_volume_slider(x, y, width, height, frac)
     frac = clamp(frac or 0, 0, 1)
     local a = accent()
@@ -1093,42 +1341,60 @@ local function draw_volume_slider(x, y, width, height, frac)
 end
 local function draw_progress(x, y, width, height, frac, active)
     frac = clamp(frac or 0, 0, 1)
-    rounded_panel(x, y, width, height, C.line, height / 2)
-    color(active or accent()); love.graphics.rectangle("fill", x, y, width * frac, height, height / 2, height / 2)
-    color(C.text); love.graphics.circle("fill", x + width * frac, y + height / 2, height * 1.18)
+    local a = active or accent()
+    rounded_panel(x, y, width, height, C.card3, height / 2)
+    color(a); love.graphics.rectangle("fill", x, y, width * frac, height, height / 2, height / 2)
+    local knob_x, knob_y = x + width * frac, y + height / 2
+    color(a, 0.18); love.graphics.circle("fill", knob_x, knob_y, height * 1.65)
+    color(a); love.graphics.circle("fill", knob_x, knob_y, height * 1.25)
+    color({1, 1, 1, 0.88}); love.graphics.circle("fill", knob_x, knob_y, height * 0.45)
 end
 local function draw_upper()
     draw_upper_background()
     local track, a = current_track(), accent()
     color(C.muted)
     love.graphics.setFont(state.fonts.small)
-    local playbackHeading
-    if state.audioReady then
-        playbackHeading = state.playing and "正在播放" or "已暂停"
-    elseif state.streaming then
-        playbackHeading = "正在加载"
-    else
-        playbackHeading = "等待播放"
+    local playbackHeading = ({
+        idle = "等待播放",
+        resolving = "正在获取播放地址",
+        loading = "正在加载",
+        starting = "正在启动播放",
+        buffering = "正在缓冲",
+        playing = "正在播放",
+        paused = "已暂停",
+        failed = "播放失败"
+    })[state.playbackState] or "等待播放"
+    local chip_width = state.fonts.small:getWidth(playbackHeading) + 34
+    rounded_panel(42, 34, chip_width, 38, {a[1], a[2], a[3], 0.16}, 19)
+    color(a); love.graphics.rectangle("line", 42, 34, chip_width, 38, 19, 19)
+    color(a); love.graphics.print(playbackHeading, 58, 43)
+    if state.playbackState == "failed" and state.playbackError then
+        love.graphics.setFont(state.fonts.tiny)
+        love.graphics.printf(truncate(state.playbackError, state.fonts.tiny, 900), 54, 78, 900)
+        love.graphics.setFont(state.fonts.small)
     end
-    love.graphics.print(playbackHeading, 54, 50)
-    love.graphics.printf(tostring(track.extension or "audio"):upper(), 820, 50, 150, "right")
+    local formatText = tostring(track.extension or "audio"):upper()
+    local formatWidth = state.fonts.tiny:getWidth(formatText) + 28
+    rounded_panel(982 - formatWidth, 34, formatWidth, 38, C.card2, 19)
+    color(C.muted); love.graphics.setFont(state.fonts.tiny)
+    love.graphics.printf(formatText, 982 - formatWidth, 45, formatWidth, "center")
 
     draw_cover(track, 64, 190, 330, 26)
 
     local x, width = 438, 522
     color(C.text)
     love.graphics.setFont(state.fonts.title)
-    love.graphics.print(truncate(track.title, state.fonts.title, width), x, 120)
+    love.graphics.print(truncate(track.title, state.fonts.title, width), x, 132)
     color(C.muted)
     love.graphics.setFont(state.fonts.body)
-    love.graphics.print(truncate(track.artist, state.fonts.body, width), x, 184)
+    love.graphics.print(truncate(track.artist, state.fonts.body, width), x, 194)
     love.graphics.setFont(state.fonts.small)
-    love.graphics.print(truncate(track.album, state.fonts.small, width), x, 218)
+    love.graphics.print(truncate(track.album, state.fonts.small, width), x, 228)
 
-    rounded_panel(x, 260, width, 330, C.card, 24)
+    soft_panel(x, 268, width, 340, C.card, 24, 0.06)
     color(a)
     love.graphics.setFont(state.fonts.label)
-    love.graphics.print("歌词", x + 24, 264)
+    love.graphics.print("歌詞", x + 24, 276)
     color(C.text)
     love.graphics.setFont(state.fonts.body)
     local current_lyric = current_lyric_index()
@@ -1139,9 +1405,16 @@ local function draw_upper()
             local entry = state.lyrics.lines[index]
             if entry then
                 local active = index == current_lyric
-                color(active and a or C.muted, active and 1 or 0.84)
+                local line_y = 326 + offset * 56
+                if active then
+                    color(a, 0.11)
+                    love.graphics.rectangle("fill", x + 18, line_y - 6, width - 36, 36, 12, 12)
+
+                end
+                local text_x = active and x + 34 or x + 24
+                color(active and a or C.muted, active and 1 or 0.60)
                 love.graphics.setFont(active and state.fonts.body or state.fonts.small)
-                love.graphics.printf(entry.text, x + 24, 326 + offset * 56, width - 48)
+                love.graphics.printf(entry.text, text_x, line_y, width - (text_x - x) - 24)
             end
         end
     else
@@ -1165,6 +1438,29 @@ local function draw_button(r, label, active, font)
     love.graphics.setFont(font or state.fonts.control)
     love.graphics.printf(label, r.x, r.y + (r.h - (font or state.fonts.control):getHeight()) / 2 - 1, r.w, "center")
 end
+local function draw_list_status_icon(cx, cy, status)
+    local a = accent()
+    if status == "playing" then
+        color(a)
+        love.graphics.polygon("fill", cx - 7, cy - 9, cx - 7, cy + 9, cx + 8, cy)
+    elseif status == "paused" then
+        color(C.muted)
+        love.graphics.rectangle("fill", cx - 7, cy - 9, 5, 18, 2, 2)
+        love.graphics.rectangle("fill", cx + 2, cy - 9, 5, 18, 2, 2)
+    elseif status == "failed" then
+        color({0.82, 0.22, 0.24, 1})
+        love.graphics.circle("fill", cx, cy, 10)
+        color({1, 1, 1, 1})
+        love.graphics.rectangle("fill", cx - 1.5, cy - 6, 3, 8, 1.5, 1.5)
+        love.graphics.circle("fill", cx, cy + 5, 1.8)
+    else
+        color(a)
+        love.graphics.circle("fill", cx - 7, cy, 2.6)
+        love.graphics.circle("fill", cx, cy, 2.6)
+        love.graphics.circle("fill", cx + 7, cy, 2.6)
+    end
+end
+
 local function draw_library()
     state.rowHitboxes = {}
     local items = state.tracks
@@ -1176,9 +1472,10 @@ local function draw_library()
             local r = {x = 34, y = y, w = 580, h = 70, index = index}
             state.rowHitboxes[#state.rowHitboxes + 1] = r
             local selected = index == state.selected
-            rounded_panel(r.x, r.y, r.w, r.h, selected and C.card2 or C.card, 18)
-            if selected then color(accent(), 0.9); love.graphics.rectangle("fill", r.x, r.y + 12, 4, r.h - 24, 2, 2) end
+            soft_panel(r.x, r.y, r.w, r.h, selected and C.card2 or C.card, 18, selected and 0.075 or 0.035)
             local title = item.title or item.name or ""
+            local status = get_track_status(item)
+            if is_favorite(item) then title = "★ " .. title end
             local subtitle = item.subtitle
             if not subtitle then
                 subtitle = tostring(item.artist or "") .. (item.album and item.album ~= "" and ("   ·  " .. item.album) or "")
@@ -1188,12 +1485,25 @@ local function draw_library()
             love.graphics.print(truncate(title, state.fonts.track, 430), r.x + 28, r.y + 11)
             color(C.muted)
             love.graphics.setFont(state.fonts.small)
-            love.graphics.print(truncate(subtitle, state.fonts.small, 416), r.x + 58, r.y + 43)
-            local right = "--:--"
-            if item.kind == "action" then right = "A"
-            elseif item.kind == "playlist" then right = tostring(item.trackCount or 0) .. " 首"
-            elseif item.duration then right = fmt_time(item.duration) end
-            love.graphics.printf(right, r.x, r.y + 25, r.w - 18, "right")
+            love.graphics.print(truncate(subtitle, state.fonts.small, 416), r.x + 28, r.y + 43)
+            local right = nil
+            local iconStatus = nil
+            if item.kind == "action" then
+                right = "A"
+            elseif item.kind == "playlist" then
+                right = tostring(item.trackCount or 0)
+            elseif status == "failed" or status == "loading" or status == "starting" or status == "resolving" or status == "buffering" or status == "playing" or status == "paused" then
+                iconStatus = status
+            elseif item.duration then
+                right = fmt_time(item.duration)
+            end
+            if right then
+                color(C.muted)
+                love.graphics.printf(right, r.x, r.y + 25, r.w - 18, "right")
+            end
+            if iconStatus then
+                draw_list_status_icon(r.x + r.w - 36, r.y + r.h / 2, iconStatus)
+            end
         end
     end
     if #items > VISIBLE_ROWS then
@@ -1207,14 +1517,63 @@ local function draw_library()
         love.graphics.rectangle("fill", rail_x, thumb_y, rail_w, thumb_h, rail_w / 2, rail_w / 2)
     end
 end
+local function draw_toggle_button(r, kind, active)
+    local a = accent()
+    rounded_panel(r.x, r.y, r.w, r.h, active and a or C.card2, r.h / 2)
+    local fg = active and C.dark or C.text
+    color(fg)
+    local cx, cy = r.x + r.w / 2, r.y + r.h / 2
+    if kind == "shuffle" then
+        love.graphics.setLineWidth(2.2)
+        love.graphics.line(cx - 11, cy - 7, cx + 7, cy + 7)
+        love.graphics.line(cx - 11, cy + 7, cx + 7, cy - 7)
+        love.graphics.polygon("fill", cx + 12, cy + 8, cx + 4, cy + 7, cx + 9, cy + 1)
+        love.graphics.polygon("fill", cx + 12, cy - 8, cx + 4, cy - 7, cx + 9, cy - 1)
+        love.graphics.setLineWidth(1)
+    else
+        love.graphics.setLineWidth(2.2)
+        love.graphics.line(cx - 11, cy - 6, cx + 7, cy - 6)
+        love.graphics.polygon("fill", cx + 12, cy - 6, cx + 5, cy - 10, cx + 5, cy - 2)
+        love.graphics.line(cx + 11, cy + 6, cx - 7, cy + 6)
+        love.graphics.polygon("fill", cx - 12, cy + 6, cx - 5, cy + 2, cx - 5, cy + 10)
+        love.graphics.setLineWidth(1)
+    end
+end
+
+local function draw_transport_button(r, kind, active)
+    if active then
+        color({0.10, 0.13, 0.20, 0.11})
+        love.graphics.rectangle("fill", r.x, r.y + 3, r.w, r.h, r.h / 2, r.h / 2)
+    end
+    rounded_panel(r.x, r.y, r.w, r.h, active and accent() or C.card2, r.h / 2)
+    local cx, cy = r.x + r.w / 2, r.y + r.h / 2
+    color(active and C.dark or C.text)
+    if kind == "prev" then
+        love.graphics.polygon("fill", cx - 2, cy - 10, cx - 2, cy + 10, cx - 13, cy)
+        love.graphics.polygon("fill", cx + 12, cy - 10, cx + 12, cy + 10, cx + 1, cy)
+    elseif kind == "next" then
+        love.graphics.polygon("fill", cx - 12, cy - 10, cx - 12, cy + 10, cx - 1, cy)
+        love.graphics.polygon("fill", cx + 2, cy - 10, cx + 2, cy + 10, cx + 13, cy)
+    elseif kind == "pause" then
+        love.graphics.rectangle("fill", cx - 9, cy - 11, 7, 22, 2, 2)
+        love.graphics.rectangle("fill", cx + 2, cy - 11, 7, 22, 2, 2)
+    else
+        love.graphics.polygon("fill", cx - 8, cy - 12, cx - 8, cy + 12, cx + 8, cy)
+    end
+end
+
 local function draw_player_card()
-    local x, y, w, h = 666, 112, 318, 596
+    local x, y, w, h = 666, 112, 318, 560
     if state.section == "online" and state.online.view == "login" then
-        rounded_panel(x, y, w, h, C.card, 24)
+        soft_panel(x, y, w, h, C.card, 24, 0.07)
+        local loginAccent = accent()
+        rounded_panel(x + 18, y + 16, w - 36, 42, {loginAccent[1], loginAccent[2], loginAccent[3], 0.10}, 18)
         color(C.text); love.graphics.setFont(state.fonts.track)
         love.graphics.printf("扫码登录网易云", x + 20, y + 26, w - 40, "center")
         color(C.muted); love.graphics.setFont(state.fonts.small)
         love.graphics.printf("使用手机网易云音乐扫描下方二维码", x + 20, y + 70, w - 40, "center")
+        rounded_panel(x + 34, y + 120, 250, 252, C.card, 22)
+        color(C.line, 0.85); love.graphics.rectangle("line", x + 34, y + 120, 250, 252, 22, 22)
         if state.online.qrImage then
             love.graphics.setColor(1, 1, 1, 1)
             local iw, ih = state.online.qrImage:getDimensions()
@@ -1225,25 +1584,30 @@ local function draw_player_card()
             color(C.muted); love.graphics.setFont(state.fonts.body)
             love.graphics.printf("二维码加载中...", x + 39, y + 226, 240, "center")
         end
+        rounded_panel(x + 18, y + 416, w - 36, 48, C.card2, 18)
         color(accent()); love.graphics.setFont(state.fonts.label)
         love.graphics.printf(state.online.loginMessage or "等待扫码", x + 20, y + 392, w - 40, "center")
         color(C.muted); love.graphics.setFont(state.fonts.small)
         love.graphics.printf("扫码后在手机上确认登录", x + 20, y + 430, w - 40, "center")
         local a = accent()
-        rounded_panel(x + 18, y + 480, w - 36, 88, {a[1], a[2], a[3], 0.06}, 18)
-        local vx, vy, vw = x + 22, y + 530, w - 44
-        color(C.text); love.graphics.setFont(state.fonts.label); love.graphics.print("音量", vx, vy - 32)
-        color(accent()); love.graphics.printf(string.format("%d%%", math.floor(state.masterVolume * 100 + 0.5)), vx, vy - 32, vw, "right")
-        state.quickVolumeRect = {x = vx - 14, y = vy - 32, w = vw + 28, h = 76}
-        draw_volume_slider(vx, vy, vw, 14, state.masterVolume)
+            local vx, vy, vw = x + 26, y + 492, w - 52
+        color(C.text); love.graphics.setFont(state.fonts.control); love.graphics.print("音量", vx, y + 446)
+        color(accent()); love.graphics.setFont(state.fonts.control); love.graphics.printf(string.format("%d%%", math.floor(state.masterVolume * 100 + 0.5)), vx, y + 446, vw, "right")
+        state.quickVolumeRect = {x = vx - 20, y = y + 438, w = vw + 40, h = 78}
+        draw_volume_slider(vx, vy, vw, 16, state.masterVolume)
         state.buttonRects, state.progressRect = {}, nil
         return
     end
-    rounded_panel(x, y, w, h, C.card, 24)
+    soft_panel(x, y, w, h, C.card, 24, 0.07)
     local track = current_track()
-    color(C.muted)
-    love.graphics.setFont(state.fonts.small)
-    love.graphics.print("当前曲目", x + 22, y + 20)
+    local statusLabel = ({
+        idle = "等待播放", resolving = "获取地址", loading = "正在加载", starting = "启动播放",
+        buffering = "正在缓冲", playing = "正在播放", paused = "已暂停", failed = "播放失败"
+    })[state.playbackState] or "等待播放"
+    local sa = accent()
+    local statusWidth = state.fonts.tiny:getWidth(statusLabel) + 24
+    rounded_panel(x + 18, y + 14, statusWidth, 30, {sa[1], sa[2], sa[3], 0.12}, 15)
+    color(sa); love.graphics.setFont(state.fonts.tiny); love.graphics.print(statusLabel, x + 30, y + 21)
 
     color(C.text)
     love.graphics.setFont(state.fonts.track)
@@ -1261,30 +1625,30 @@ local function draw_player_card()
     draw_progress(x + 22, y + 198, w - 44, 8, state.duration > 0 and state.position / state.duration or 0, accent())
 
     local buttons = {
-        prev = {x = x + 36, y = y + 246, w = 54, h = 54},
-        play = {x = x + 112, y = y + 234, w = 76, h = 78},
-        next = {x = x + 210, y = y + 246, w = 54, h = 54},
-        shuffle = {x = x + 56, y = y + 338, w = 92, h = 38},
-        repeatTrack = {x = x + 170, y = y + 338, w = 92, h = 38},
+        prev = {x = x + 22, y = y + 246, w = 82, h = 56},
+        play = {x = x + 112, y = y + 234, w = 94, h = 78},
+        next = {x = x + 214, y = y + 246, w = 82, h = 56},
+        shuffle = {x = x + 60, y = y + 326, w = 84, h = 36},
+        repeatTrack = {x = x + 174, y = y + 326, w = 84, h = 36},
     }
     state.buttonRects = buttons
-    draw_button(buttons.prev, "<")
-    draw_button(buttons.play, state.playing and "II" or ">", true)
-    draw_button(buttons.next, ">")
+    draw_transport_button(buttons.prev, "prev", false)
+    draw_transport_button(buttons.play, state.playing and "pause" or "play", true)
+    draw_transport_button(buttons.next, "next", false)
     -- Volume is controlled by the slider below.
-    draw_button(buttons.shuffle, "随机", state.shuffle, state.fonts.small)
-    draw_button(buttons.repeatTrack, "循环", state.repeatTrack, state.fonts.small)
+    draw_toggle_button(buttons.shuffle, "shuffle", state.shuffle)
+    draw_toggle_button(buttons.repeatTrack, "repeat", state.repeatTrack)
 
     local a = accent()
-    rounded_panel(x + 18, y + 480, w - 36, 88, {a[1], a[2], a[3], 0.06}, 18)
-    local vx, vy, vw = x + 22, y + 530, w - 44
+    local vx, vy, vw = x + 26, y + 492, w - 52
     color(C.text)
-    love.graphics.setFont(state.fonts.label)
-    love.graphics.print("音量", vx, vy - 32)
+    love.graphics.setFont(state.fonts.control)
+    love.graphics.print("音量", vx, y + 446)
     color(accent())
-    love.graphics.printf(string.format("%d%%", math.floor(state.masterVolume * 100 + 0.5)), vx, vy - 32, vw, "right")
-    state.quickVolumeRect = {x = vx - 14, y = vy - 32, w = vw + 28, h = 76}
-    draw_volume_slider(vx, vy, vw, 14, state.masterVolume)
+    love.graphics.setFont(state.fonts.control)
+    love.graphics.printf(string.format("%d%%", math.floor(state.masterVolume * 100 + 0.5)), vx, y + 446, vw, "right")
+    state.quickVolumeRect = {x = vx - 20, y = y + 438, w = vw + 40, h = 78}
+    draw_volume_slider(vx, vy, vw, 16, state.masterVolume)
 end
 
 local function draw_lower()
@@ -1300,11 +1664,12 @@ local function draw_lower()
         count_text = state.scanActive and string.format("正在扫描 %d 首", state.scanCount) or string.format("%d 首歌曲", #state.tracks)
         count_text = count_text .. "   ·  MP3 / OGG / WAV"
     else
-        count_text = (state.online.client and state.online.client:is_busy() and "正在与网易云同步..." or state.online.status) .. "  ·  " .. (state.mpv and state.mpv:available() and "MPV 直连" or "在线播放不可用")
+        count_text = state.online.status
     end
     love.graphics.print(truncate(count_text, state.fonts.small, 560), 40, 84)
-    state.sectionRects["local"] = {x = 628, y = 38, w = 92, h = 42}
-    state.sectionRects.online = {x = 728, y = 38, w = 118, h = 42}
+    rounded_panel(614, 32, 238, 54, C.card2, 27)
+    state.sectionRects["local"] = {x = 620, y = 36, w = 108, h = 46}
+    state.sectionRects.online = {x = 736, y = 36, w = 110, h = 46}
     draw_button(state.sectionRects["local"], "L 本地", state.section == "local", state.fonts.small)
     draw_button(state.sectionRects.online, "R 网易云", state.section == "online", state.fonts.small)
     state.rescanRect = {x = 854, y = 38, w = 132, h = 42}
@@ -1312,9 +1677,29 @@ local function draw_lower()
     draw_button(state.rescanRect, refresh_label, false, state.fonts.small)
     draw_library(); draw_player_card()
     color(state.audioReady and accent() or C.accent2, 0.92)
-    love.graphics.setFont(state.fonts.tiny)
+    local footerFont = state.fonts.footer or state.fonts.tiny
     local footer = state.section == "online" and state.online.status or state.status
-    love.graphics.print(truncate(footer, state.fonts.tiny, 650), 40, 721)
+    rounded_panel(34, 711, 956, 40, C.card, 20)
+    color(C.muted); love.graphics.setFont(footerFont)
+    love.graphics.print(truncate(footer, footerFont, 500), 52, 719)
+    local hints = {{"A", "选择"}, {"Start", "播放"}, {"B", "返回"}, {"X", "收藏"}, {"Y", "重试"}}
+    local hint_gap = 14
+    local hint_total = 0
+    for _, hint in ipairs(hints) do
+        hint_total = hint_total + footerFont:getWidth(hint[1]) + footerFont:getWidth(hint[2]) + 20 + hint_gap
+    end
+    hint_total = hint_total - hint_gap
+    local hint_x = 560 + math.max(12, (424 - hint_total) / 2)
+    for _, hint in ipairs(hints) do
+        local key_width = footerFont:getWidth(hint[1]) + 12
+        local label_width = footerFont:getWidth(hint[2])
+        local pill_width = key_width + label_width + 8
+        local text_y = 716 + (30 - footerFont:getHeight()) / 2
+        rounded_panel(hint_x, 716, pill_width, 30, C.card2, 15)
+        color(accent()); love.graphics.printf(hint[1], hint_x + 5, text_y, key_width - 4, "center")
+        color(C.muted); love.graphics.print(hint[2], hint_x + key_width + 2, text_y)
+        hint_x = hint_x + pill_width + hint_gap
+    end
 end
 local function point_in(r, x, y) return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h end
 local function slider_fraction(r, x) return clamp((x - r.x) / r.w, 0, 1) end
@@ -1331,7 +1716,7 @@ local function handle_tap(x, y)
         return
     end
     for _, row in ipairs(state.rowHitboxes or {}) do
-        if point_in(row, x, y) then select_track(row.index, true); return end
+        if point_in(row, x, y) then select_track(row.index, false); return end
     end
     local buttons = state.buttonRects
     if point_in(buttons.play, x, y) then toggle_play()
@@ -1416,8 +1801,8 @@ local function perform_action(action)
     if action == "play_pause" then toggle_play()
     elseif action == "previous" then next_track(-1)
     elseif action == "next" then next_track(1)
-    elseif action == "volume_down" then adjust_master_volume(-0.10)
-    elseif action == "volume_up" then adjust_master_volume(0.10)
+    elseif action == "volume_down" then adjust_master_volume(-0.05)
+    elseif action == "volume_up" then adjust_master_volume(0.05)
     elseif action == "shuffle" then state.shuffle = not state.shuffle
     elseif action == "repeat_track" then state.repeatTrack = not state.repeatTrack
     elseif action == "scroll_up" then state.scroll = clamp(state.scroll - 1, 1, math.max(1, #state.tracks - VISIBLE_ROWS + 1))
@@ -1426,13 +1811,21 @@ local function perform_action(action)
     elseif action == "select_next" then select_track(state.selected + 1, false)
     elseif action == "activate" then activate_selected()
     elseif action == "play_selected" then play_selected()
+    elseif action == "favorite" then toggle_favorite()
+    elseif action == "more" then
+        if loading_active() then cancel_loading()
+        elseif state.playbackState == "failed" then play_selected()
+        else set_user_status("Y：当前没有可重试或取消的播放任务") end
     elseif action == "rescan" then
-        if state.section == "local" then start_scan() elseif state.online.loggedIn then refresh_playlists() else state.online.started = false; set_section("local"); set_section("online") end
+        if state.section == "local" then start_scan()
+        elseif state.online.loggedIn then refresh_playlists()
+        else state.online.started = false; set_section("local"); set_section("online") end
     elseif action == "toggle_section" then set_section(state.section == "local" and "online" or "local")
     elseif action == "section_local" then set_section("local")
     elseif action == "section_online" then set_section("online")
     elseif action == "back" then
-        if state.section == "online" then online_back() end
+        if loading_active() then cancel_loading()
+        elseif state.section == "online" then online_back() end
     elseif action == "quit" then
         love.event.quit()
     end
@@ -1460,12 +1853,24 @@ function love.load()
     love.graphics.setBackgroundColor(C.bg)
     state.fontData = load_font_data()
     state.fonts.small, state.fonts.tiny = make_font(16), make_font(13)
+    state.fonts.micro = make_font(11)
+    state.fonts.footer = make_font(14)
     state.fonts.label, state.fonts.control = make_font(18), make_font(20)
     state.fonts.body, state.fonts.track = make_font(22), make_font(24)
     state.fonts.header, state.fonts.title = make_font(38), make_font(46)
     state.controls = require("controls")
+    load_favorites()
     state.audioRoute = AudioRoute.open()
     load_settings()
+    if state.audioRoute and state.audioRoute.set_output_change_callback then
+        state.audioRoute:set_output_change_callback(function(inserted)
+            store_current_volume()
+            state.output = inserted and "headphone" or "speaker"
+            state.masterVolume = volume_for_output(state.output)
+            apply_source_volume()
+            save_settings()
+        end)
+    end
     state.paths = music_paths(); state.tracks = {}
     state.localUI = {tracks = state.tracks, selected = 1, scroll = 1}
     local saveDir = love.filesystem.getSaveDirectory() or (app_root() .. "/saves")
@@ -1484,9 +1889,9 @@ function love.load()
         artClient = Netease.new({binary = netease_binary(), data_dir = dataDir, output_dir = runtimeDir .. "/art"}),
         prefetchClient = Netease.new({binary = netease_binary(), data_dir = dataDir, output_dir = runtimeDir .. "/prefetch"}),
         lyricClient = Netease.new({binary = netease_binary(), data_dir = dataDir, output_dir = runtimeDir .. "/lyrics"}),
-        urlCache = {}, artPending = nil, artSeen = {}, lyricPending = nil, lyricSeen = {}, prefetchPending = nil, prefetchInFlight = nil, prefetchWaitUntil = 0, prefetchWaitTrack = nil,
+        urlCache = {}, unplayable = {}, artPending = nil, artSeen = {}, lyricPending = nil, lyricSeen = {}, prefetchPending = nil, prefetchInFlight = nil, prefetchWaitUntil = 0, prefetchWaitTrack = nil,
         view = "home", menu = {}, tracks = {}, selected = 1, scroll = 1,
-        loggedIn = false, nickname = "", uid = 0, status = state.mpv and "在线直连播放已启用" or "未检测到 mpv，在线播放不可用",
+        loggedIn = false, nickname = "", uid = 0, vipType = 0, redVipLevel = 0, vipLevel = 0, member = false, status = state.mpv and "在线直连播放已启用" or "未检测到 mpv，在线播放不可用",
         qrImage = nil, qrPath = "", loginState = "idle", loginMessage = "等待扫码", pollAt = 0,
         prepareID = nil, pendingTrack = nil, wantedGeneration = 0, progressAt = 0, started = false, requestStartedAt = 0, requestTrack = nil, requestStreaming = false, streamRetryCount = 0,
     }
@@ -1495,7 +1900,10 @@ function love.load()
 end
 function love.update(dt)
     state.time = state.time + dt
-    if state.audioRoute then state.audioRoute:poll() end
+    if state.audioRoute then
+        state.audioRoute:poll()
+        sync_output_volume()
+    end
     process_scan(0.008)
     if state.online and state.online.client then
         state.online.client:update()
@@ -1547,6 +1955,9 @@ function love.update(dt)
 
             if not status.eof then
                 local title = state.nowPlaying and tostring(state.nowPlaying.title) or ""
+                if not state.playbackConfirmed then set_playback_state(status.buffering and "buffering" or "starting", state.nowPlaying, title)
+                elseif status.paused then set_playback_state("paused", state.nowPlaying, nil)
+                else set_playback_state("playing", state.nowPlaying, nil) end
                 if not state.playbackConfirmed then
                     if status.buffering then
                         state.online.status = "缓冲中：" .. title
@@ -1562,6 +1973,7 @@ function love.update(dt)
 
             if status.eof and not state.mpvEofHandled then
                 state.mpvEofHandled = true
+                set_playback_state("idle", state.nowPlaying, nil)
                 if state.time >= (state.advanceGuardUntil or 0) then
                     state.advanceGuardUntil = state.time + 2
                     if state.repeatTrack and state.nowPlaying then
@@ -1592,6 +2004,10 @@ function love.update(dt)
             retry_stream_playback("mpv 启动失败")
         end
     end
+    if state.online and state.online.requestStreaming and state.online.requestStartedAt and state.online.requestStartedAt > 0 and state.time - state.online.requestStartedAt > 10 then
+        state.online.requestStartedAt = 0
+        retry_stream_playback("获取播放地址超时")
+    end
     if state.playing and state.source then
         state.position = state.position + dt
         if state.duration > 0 and state.position >= state.duration then
@@ -1601,6 +2017,7 @@ function love.update(dt)
                 state.advanceGuardUntil = state.time + 2
                 state.source:stop()
                 state.playing, state.audioReady = false, false
+                set_playback_state("idle", state.nowPlaying, nil)
                 next_track(1)
             end
         end

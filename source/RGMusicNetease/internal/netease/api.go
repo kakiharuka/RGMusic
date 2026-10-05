@@ -32,11 +32,17 @@ func (c *Client) fetchAccount() (Account, error) {
 	var response struct {
 		Code    float64 `json:"code"`
 		Account struct {
-			ID int64 `json:"id"`
+			ID          int64 `json:"id"`
+			VipType     int   `json:"vipType"`
+			RedVipLevel int   `json:"redVipLevel"`
+			VipLevel    int   `json:"vipLevel"`
 		} `json:"account"`
 		Profile struct {
-			UserID   int64  `json:"userId"`
-			Nickname string `json:"nickname"`
+			UserID      int64  `json:"userId"`
+			Nickname    string `json:"nickname"`
+			VipType     int    `json:"vipType"`
+			RedVipLevel int    `json:"redVipLevel"`
+			VipLevel    int    `json:"vipLevel"`
 		} `json:"profile"`
 	}
 	if err := json.Unmarshal(body, &response); err != nil {
@@ -49,7 +55,17 @@ func (c *Client) fetchAccount() (Account, error) {
 	if response.Code != 200 || uid == 0 {
 		return Account{}, fmt.Errorf("account is not logged in")
 	}
-	return Account{LoggedIn: true, Nickname: response.Profile.Nickname, UID: uid}, nil
+	vipType, redVipLevel, vipLevel := response.Profile.VipType, response.Profile.RedVipLevel, response.Profile.VipLevel
+	if response.Account.VipType > vipType {
+		vipType = response.Account.VipType
+	}
+	if response.Account.RedVipLevel > redVipLevel {
+		redVipLevel = response.Account.RedVipLevel
+	}
+	if response.Account.VipLevel > vipLevel {
+		vipLevel = response.Account.VipLevel
+	}
+	return Account{LoggedIn: true, Nickname: response.Profile.Nickname, UID: uid, VipType: vipType, RedVipLevel: redVipLevel, VipLevel: vipLevel}, nil
 }
 
 func (c *Client) Playlists() ([]Playlist, error) {

@@ -1,9 +1,12 @@
 package netease
 
 type Account struct {
-	LoggedIn bool
-	Nickname string
-	UID      int64
+	LoggedIn    bool
+	Nickname    string
+	UID         int64
+	VipType     int
+	RedVipLevel int
+	VipLevel    int
 }
 
 type Playlist struct {

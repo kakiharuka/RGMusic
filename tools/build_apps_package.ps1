@@ -54,6 +54,8 @@ Reset-Directory $Packaging
 New-Item -ItemType Directory -Path $AppsApp, $ImagesRoot -Force | Out-Null
 Copy-Item -LiteralPath $SourceLauncher -Destination (Join-Path $AppsRoot "RG Music.sh")
 Copy-Item -LiteralPath (Join-Path $SourceApp "app") -Destination $AppsApp -Recurse
+$BinKeep = Join-Path $AppsApp "app\bin\.gitkeep"
+if (Test-Path -LiteralPath $BinKeep) { Remove-Item -LiteralPath $BinKeep -Force }
 Copy-Item -LiteralPath (Join-Path $SourceApp "runtime") -Destination $AppsApp -Recurse
 Copy-Item -LiteralPath $IconPng -Destination (Join-Path $ImagesRoot "RG Music.png")
 Copy-Item -LiteralPath $IconPng -Destination (Join-Path $AppsApp "app\assets\RG Music.png") -Force

@@ -215,6 +215,11 @@ function Mpv:query_many(properties)
     end
     return result
 end
+local function volume_percent(gain)
+    gain = math.max(0, math.min(1, gain or 0.5))
+    return math.floor((gain ^ (1 / 3)) * 100 + 0.5)
+end
+
 function Mpv:play(url, volume)
     local previous_socket, previous_pid_path = self.socket, self.pid_path
     self:stop()
@@ -223,7 +228,7 @@ function Mpv:play(url, volume)
     self.pid_path = self.pid_base .. "-" .. tostring(self.sequence) .. ".pid"
     self:remove_runtime_files()
 
-    local volume_value = math.floor(math.max(0, math.min(1, volume or 0.5)) * 100 + 0.5)
+    local volume_value = volume_percent(volume)
     local launch = "echo $$ > " .. shell_quote(self.pid_path) .. "; echo $$ > " .. shell_quote(self.pid_base) .. "; exec " .. shell_quote(self.binary) ..
         " --no-config --no-video --vo=null --ao=pulse,alsa --idle=yes" ..
         " --cache=yes --cache-pause=no --volume=" .. tostring(volume_value) ..
@@ -275,7 +280,7 @@ end
 
 function Mpv:set_volume(volume)
     if not self.active then return end
-    local value = math.floor(math.max(0, math.min(1, volume or 0.5)) * 100 + 0.5)
+    local value = volume_percent(volume)
     self:command({"set_property", "volume", value})
 end
 
