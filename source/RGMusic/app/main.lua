@@ -42,7 +42,7 @@ local state = {
     paths = {}, fonts = {}, fontData = nil, fontPath = nil, controls = nil,
     rowHitboxes = {}, buttonRects = {},
     progressRect = nil, quickVolumeRect = nil, rescanRect = nil,
-    coverImage = nil, coverData = nil, coverPalette = nil, nowPlaying = nil,
+    coverImage = nil, coverData = nil, coverMood = nil, coverPalette = nil, nowPlaying = nil,
     section = "local", localUI = nil, online = nil, sectionRects = {},
     lyrics = {lines = {}, current = 1, available = false, source = nil}, touch = nil, touchOrigin = nil, evdevActive = false,
     pointer = {active = false, downX = 0, downY = 0, lastX = 0, lastY = 0,
@@ -68,6 +68,16 @@ end
 local function soft_panel(x, y, w, h, fill, radius, strength)
     rounded_panel(x, y, w, h, fill, radius or 18)
 end
+local function glass_panel(x, y, w, h, radius, tint, alpha)
+    radius = radius or 18
+    local base = tint or C.card
+    local a = accent()
+    color({base[1], base[2], base[3], alpha or 0.72})
+    love.graphics.rectangle("fill", x, y, w, h, radius, radius)
+    color(a, 0.060)
+    love.graphics.rectangle("fill", x, y, w, h, radius, radius)
+end
+
 local function clamp(v, low, high) return math.max(low, math.min(high, v)) end
 local function fmt_time(seconds)
     seconds = math.max(0, math.floor(seconds or 0))
@@ -211,7 +221,68 @@ local function average_color(imageData)
 end
 local function release_cover()
     if state.coverImage then state.coverImage:release() end
-    state.coverImage, state.coverData, state.coverPalette = nil, nil, nil
+    if state.coverMood then state.coverMood:release() end
+    state.coverImage, state.coverData, state.coverMood, state.coverPalette = nil, nil, nil, nil
+end
+
+local coverBlurShader
+local coverBlurShaderFailed = false
+
+local function get_cover_blur_shader()
+    if coverBlurShader or coverBlurShaderFailed then return coverBlurShader end
+    local ok, shader = pcall(love.graphics.newShader, [=[
+extern vec2 blur_step;
+vec4 effect(vec4 color, Image tex, vec2 uv, vec2 sc) {
+    vec4 sum = Texel(tex, uv) * 0.227027;
+    sum += Texel(tex, uv + blur_step * 1.384615) * 0.316216;
+    sum += Texel(tex, uv - blur_step * 1.384615) * 0.316216;
+    sum += Texel(tex, uv + blur_step * 3.230769) * 0.070270;
+    sum += Texel(tex, uv - blur_step * 3.230769) * 0.070270;
+    return sum * color;
+}
+]=])
+    if not ok then coverBlurShaderFailed = true; return nil end
+    coverBlurShader = shader
+    return coverBlurShader
+end
+
+local function make_cover_mood(image)
+    if not image then return nil end
+    local iw, ih = image:getDimensions()
+    local scale = 128 / math.max(iw, ih)
+    local mw = math.max(16, math.floor(iw * scale))
+    local mh = math.max(16, math.floor(ih * scale))
+    local okCanvas, canvas = pcall(love.graphics.newCanvas, mw, mh)
+    if not okCanvas then return nil end
+    canvas:setFilter("linear", "linear")
+    local previousCanvas = love.graphics.getCanvas()
+    local previousShader = love.graphics.getShader()
+    love.graphics.setCanvas(canvas)
+    love.graphics.clear(1, 1, 1, 0)
+    local drawScale = math.max(mw / iw, mh / ih)
+    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.draw(image, (mw - iw * drawScale) / 2, (mh - ih * drawScale) / 2, 0, drawScale, drawScale)
+
+    local okTemp, temp = pcall(love.graphics.newCanvas, mw, mh)
+    local shader = get_cover_blur_shader()
+    if okTemp and shader then
+        temp:setFilter("linear", "linear")
+        shader:send("blur_step", {1 / mw, 0})
+        love.graphics.setCanvas(temp)
+        love.graphics.setShader(shader)
+        love.graphics.clear(1, 1, 1, 0)
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.draw(canvas)
+        shader:send("blur_step", {0, 1 / mh})
+        love.graphics.setCanvas(canvas)
+        love.graphics.clear(1, 1, 1, 0)
+        love.graphics.draw(temp)
+    end
+
+    if previousShader then love.graphics.setShader(previousShader) else love.graphics.setShader() end
+    if previousCanvas then love.graphics.setCanvas(previousCanvas) else love.graphics.setCanvas() end
+    if okTemp and temp then temp:release() end
+    return canvas
 end
 local function load_cover_data(data, name)
     if not data then return false end
@@ -221,9 +292,10 @@ local function load_cover_data(data, name)
     if not okData then return false end
     local okImage, image = pcall(love.graphics.newImage, imageData)
     if not okImage then return false end
+    local mood = make_cover_mood(image)
     state.coverPalette = average_color(imageData)
     imageData:release()
-    state.coverData, state.coverImage = fileData, image
+    state.coverData, state.coverImage, state.coverMood = fileData, image, mood
     return true
 end
 local function folder_cover_candidates(track)
@@ -1262,7 +1334,7 @@ local function make_font(size)
     return love.graphics.newFont(size)
 end
 local function draw_cover_image(image, x, y, w, h, radius)
-    radius = radius or 18
+    radius = radius or 0
     love.graphics.stencil(function()
         love.graphics.rectangle("fill", x, y, w, h, radius, radius)
     end, "replace", 1)
@@ -1279,6 +1351,7 @@ local function draw_cover_image(image, x, y, w, h, radius)
     love.graphics.setStencilTest()
 end
 local function draw_fallback_cover(track, x, y, size, radius)
+    radius = radius or 0
     local p = track.palette or {{0.16,0.22,0.38},{0.35,0.58,0.96},{0.95,0.45,0.48}}
     color(p[1]); love.graphics.rectangle("fill", x, y, size, size, radius or 18, radius or 18)
     color(p[2], 0.24); love.graphics.rectangle("fill", x + size * 0.12, y + size * 0.16, size * 0.34, size * 0.045, size * 0.02, size * 0.02)
@@ -1287,57 +1360,38 @@ local function draw_fallback_cover(track, x, y, size, radius)
 end
 
 local function draw_cover(track, x, y, size, radius)
+    radius = radius or 0
     if state.coverImage then draw_cover_image(state.coverImage, x, y, size, size, radius)
     else draw_fallback_cover(track, x, y, size, radius) end
-    color({1, 1, 1, 0.96})
-    love.graphics.setLineWidth(2)
-    love.graphics.rectangle("line", x - 1, y - 1, size + 2, size + 2, (radius or 18) + 1, (radius or 18) + 1)
-    love.graphics.setLineWidth(1)
 end
-local upperGradientMesh
-local upperGradientKey
+local function draw_cover_mood(x, y, w, h, alpha)
+    if not state.coverMood then return false end
+    local iw, ih = state.coverMood:getDimensions()
+    local scale = math.max(w / iw, h / ih)
+    local dw, dh = iw * scale, ih * scale
+    love.graphics.setColor(1, 1, 1, alpha or 0.28)
+    love.graphics.draw(state.coverMood, x + (w - dw) / 2, y + (h - dh) / 2, 0, scale, scale)
+    return true
+end
 
 local function draw_upper_background()
     color(C.upper); love.graphics.rectangle("fill", 0, 0, SCREEN_W, SCREEN_H)
     local a = accent()
-    local key = string.format("%.3f,%.3f,%.3f", a[1], a[2], a[3])
-    if key ~= upperGradientKey then
-        local vertices = {
-            {0, 0, 0, 0, a[1], a[2], a[3], 0.16},
-            {SCREEN_W, 0, 1, 0, a[1], a[2], a[3], 0.16},
-            {SCREEN_W, SCREEN_H, 1, 1, a[1], a[2], a[3], 0.012},
-            {0, SCREEN_H, 0, 1, a[1], a[2], a[3], 0.012}
-        }
-        if upperGradientMesh then
-            upperGradientMesh:setVertices(vertices)
-        else
-            upperGradientMesh = love.graphics.newMesh(vertices, "fan", "dynamic")
-        end
-        upperGradientKey = key
+    if draw_cover_mood(0, 0, SCREEN_W, SCREEN_H, 0.50) then
+        color(C.upper, 0.45); love.graphics.rectangle("fill", 0, 0, SCREEN_W, SCREEN_H)
     end
-    love.graphics.setColor(1, 1, 1, 1)
-    love.graphics.draw(upperGradientMesh)
-    color(C.card, 0.74); love.graphics.rectangle("fill", 0, 0, SCREEN_W, 3)
-    color(a, 0.12); love.graphics.rectangle("fill", 0, SCREEN_H - 3, SCREEN_W, 3)
+    color(a, 0.070); love.graphics.rectangle("fill", 0, 0, SCREEN_W, SCREEN_H)
 end
 
 local function draw_volume_slider(x, y, width, height, frac)
     frac = clamp(frac or 0, 0, 1)
     local a = accent()
     rounded_panel(x, y, width, height, C.card3, height / 2)
-    color(C.line, 0.62)
-    love.graphics.rectangle("line", x, y, width, height, height / 2, height / 2)
     color(a, 0.72)
     love.graphics.rectangle("fill", x, y, width * frac, height, height / 2, height / 2)
     local knob_x, knob_y = x + width * frac, y + height / 2
-    color({0.10, 0.14, 0.22, 0.14})
-    love.graphics.circle("fill", knob_x, knob_y + 2, height * 1.28)
     color(C.card)
     love.graphics.circle("fill", knob_x, knob_y, height * 1.18)
-    color(a, 0.92)
-    love.graphics.setLineWidth(2.5)
-    love.graphics.circle("line", knob_x, knob_y, height * 1.18)
-    love.graphics.setLineWidth(1)
 end
 local function draw_progress(x, y, width, height, frac, active)
     frac = clamp(frac or 0, 0, 1)
@@ -1345,9 +1399,7 @@ local function draw_progress(x, y, width, height, frac, active)
     rounded_panel(x, y, width, height, C.card3, height / 2)
     color(a); love.graphics.rectangle("fill", x, y, width * frac, height, height / 2, height / 2)
     local knob_x, knob_y = x + width * frac, y + height / 2
-    color(a, 0.18); love.graphics.circle("fill", knob_x, knob_y, height * 1.65)
     color(a); love.graphics.circle("fill", knob_x, knob_y, height * 1.25)
-    color({1, 1, 1, 0.88}); love.graphics.circle("fill", knob_x, knob_y, height * 0.45)
 end
 local function draw_upper()
     draw_upper_background()
@@ -1366,7 +1418,6 @@ local function draw_upper()
     })[state.playbackState] or "等待播放"
     local chip_width = state.fonts.small:getWidth(playbackHeading) + 34
     rounded_panel(42, 34, chip_width, 38, {a[1], a[2], a[3], 0.16}, 19)
-    color(a); love.graphics.rectangle("line", 42, 34, chip_width, 38, 19, 19)
     color(a); love.graphics.print(playbackHeading, 58, 43)
     if state.playbackState == "failed" and state.playbackError then
         love.graphics.setFont(state.fonts.tiny)
@@ -1379,7 +1430,7 @@ local function draw_upper()
     color(C.muted); love.graphics.setFont(state.fonts.tiny)
     love.graphics.printf(formatText, 982 - formatWidth, 45, formatWidth, "center")
 
-    draw_cover(track, 64, 190, 330, 26)
+    draw_cover(track, 64, 190, 330, 0)
 
     local x, width = 438, 522
     color(C.text)
@@ -1391,7 +1442,7 @@ local function draw_upper()
     love.graphics.setFont(state.fonts.small)
     love.graphics.print(truncate(track.album, state.fonts.small, width), x, 228)
 
-    soft_panel(x, 268, width, 340, C.card, 24, 0.06)
+    glass_panel(x, 268, width, 340, 24, C.card, 0.48)
     color(a)
     love.graphics.setFont(state.fonts.label)
     love.graphics.print("歌詞", x + 24, 276)
@@ -1541,10 +1592,6 @@ local function draw_toggle_button(r, kind, active)
 end
 
 local function draw_transport_button(r, kind, active)
-    if active then
-        color({0.10, 0.13, 0.20, 0.11})
-        love.graphics.rectangle("fill", r.x, r.y + 3, r.w, r.h, r.h / 2, r.h / 2)
-    end
     rounded_panel(r.x, r.y, r.w, r.h, active and accent() or C.card2, r.h / 2)
     local cx, cy = r.x + r.w / 2, r.y + r.h / 2
     color(active and C.dark or C.text)
@@ -1565,7 +1612,7 @@ end
 local function draw_player_card()
     local x, y, w, h = 666, 112, 318, 560
     if state.section == "online" and state.online.view == "login" then
-        soft_panel(x, y, w, h, C.card, 24, 0.07)
+        glass_panel(x, y, w, h, 24, C.card, 0.42)
         local loginAccent = accent()
         rounded_panel(x + 18, y + 16, w - 36, 42, {loginAccent[1], loginAccent[2], loginAccent[3], 0.10}, 18)
         color(C.text); love.graphics.setFont(state.fonts.track)
@@ -1573,7 +1620,6 @@ local function draw_player_card()
         color(C.muted); love.graphics.setFont(state.fonts.small)
         love.graphics.printf("使用手机网易云音乐扫描下方二维码", x + 20, y + 70, w - 40, "center")
         rounded_panel(x + 34, y + 120, 250, 252, C.card, 22)
-        color(C.line, 0.85); love.graphics.rectangle("line", x + 34, y + 120, 250, 252, 22, 22)
         if state.online.qrImage then
             love.graphics.setColor(1, 1, 1, 1)
             local iw, ih = state.online.qrImage:getDimensions()
@@ -1598,7 +1644,7 @@ local function draw_player_card()
         state.buttonRects, state.progressRect = {}, nil
         return
     end
-    soft_panel(x, y, w, h, C.card, 24, 0.07)
+    glass_panel(x, y, w, h, 24, C.card, 0.42)
     local track = current_track()
     local statusLabel = ({
         idle = "等待播放", resolving = "获取地址", loading = "正在加载", starting = "启动播放",
@@ -1653,6 +1699,9 @@ end
 
 local function draw_lower()
     color(C.lower); love.graphics.rectangle("fill", 0, 0, SCREEN_W, SCREEN_H)
+    if draw_cover_mood(0, 0, SCREEN_W, SCREEN_H, 0.24) then
+        color(C.lower, 0.56); love.graphics.rectangle("fill", 0, 0, SCREEN_W, SCREEN_H)
+    end
     local title = "本地音乐"
     if state.section == "online" then
         title = state.online.view == "tracks" and "网易云 · 歌单" or "网易云音乐"
@@ -1679,26 +1728,26 @@ local function draw_lower()
     color(state.audioReady and accent() or C.accent2, 0.92)
     local footerFont = state.fonts.footer or state.fonts.tiny
     local footer = state.section == "online" and state.online.status or state.status
-    rounded_panel(34, 711, 956, 40, C.card, 20)
+    glass_panel(34, 711, 956, 40, 20, C.card, 0.58)
     color(C.muted); love.graphics.setFont(footerFont)
     love.graphics.print(truncate(footer, footerFont, 500), 52, 719)
-    local hints = {{"A", "选择"}, {"Start", "播放"}, {"B", "返回"}, {"X", "收藏"}, {"Y", "重试"}}
-    local hint_gap = 14
-    local hint_total = 0
-    for _, hint in ipairs(hints) do
-        hint_total = hint_total + footerFont:getWidth(hint[1]) + footerFont:getWidth(hint[2]) + 20 + hint_gap
+    local hints = {{"A", "选择"}, {"B", "返回"}, {"X", "播放"}, {"Y", "重试"}}
+    local hint_region_x, hint_region_width = 560, 424
+    local widths, hint_total = {}, 0
+    for index, hint in ipairs(hints) do
+        widths[index] = footerFont:getWidth(hint[1]) + footerFont:getWidth(hint[2]) + 20
+        hint_total = hint_total + widths[index]
     end
-    hint_total = hint_total - hint_gap
-    local hint_x = 560 + math.max(12, (424 - hint_total) / 2)
-    for _, hint in ipairs(hints) do
+    local gap = math.max(10, (hint_region_width - hint_total) / (#hints + 1))
+    local hint_x = hint_region_x + gap
+    for index, hint in ipairs(hints) do
         local key_width = footerFont:getWidth(hint[1]) + 12
-        local label_width = footerFont:getWidth(hint[2])
-        local pill_width = key_width + label_width + 8
+        local pill_width = widths[index]
         local text_y = 716 + (30 - footerFont:getHeight()) / 2
         rounded_panel(hint_x, 716, pill_width, 30, C.card2, 15)
         color(accent()); love.graphics.printf(hint[1], hint_x + 5, text_y, key_width - 4, "center")
         color(C.muted); love.graphics.print(hint[2], hint_x + key_width + 2, text_y)
-        hint_x = hint_x + pill_width + hint_gap
+        hint_x = hint_x + pill_width + gap
     end
 end
 local function point_in(r, x, y) return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h end

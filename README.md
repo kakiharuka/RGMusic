@@ -78,8 +78,8 @@ Lyrics lookup:
 | Button | Action |
 |---|---|
 | A | Confirm, select, enter |
-| X | Favorite or unfavorite selected track |
-| Start | Play selected track; pause/resume current track |
+| X | Same as Start: play selected track, pause/resume, cancel loading |
+| Start | Same as X: play selected track, pause/resume, cancel loading |
 | D-pad up/down | Move selection |
 | D-pad left/right | Volume down/up by 10% |
 | L1 | Local library |
