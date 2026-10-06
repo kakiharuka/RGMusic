@@ -1405,7 +1405,7 @@ local function draw_upper()
     draw_upper_background()
     local track, a = current_track(), accent()
     color(C.muted)
-    love.graphics.setFont(state.fonts.small)
+    love.graphics.setFont(state.fonts.upperSmall)
     local playbackHeading = ({
         idle = "等待播放",
         resolving = "正在获取播放地址",
@@ -1416,36 +1416,38 @@ local function draw_upper()
         paused = "已暂停",
         failed = "播放失败"
     })[state.playbackState] or "等待播放"
-    local chip_width = state.fonts.small:getWidth(playbackHeading) + 34
+    local chip_width = state.fonts.upperSmall:getWidth(playbackHeading) + 34
     rounded_panel(42, 34, chip_width, 38, {a[1], a[2], a[3], 0.16}, 19)
-    color(a); love.graphics.print(playbackHeading, 58, 43)
+    local headingY = 34 + (38 - state.fonts.upperSmall:getHeight()) / 2 - 1
+    color(a); love.graphics.printf(playbackHeading, 54, headingY, chip_width - 24, "center")
     if state.playbackState == "failed" and state.playbackError then
         love.graphics.setFont(state.fonts.tiny)
         love.graphics.printf(truncate(state.playbackError, state.fonts.tiny, 900), 54, 78, 900)
         love.graphics.setFont(state.fonts.small)
     end
     local formatText = tostring(track.extension or "audio"):upper()
-    local formatWidth = state.fonts.tiny:getWidth(formatText) + 28
+    local formatWidth = state.fonts.upperSmall:getWidth(formatText) + 28
     rounded_panel(982 - formatWidth, 34, formatWidth, 38, C.card2, 19)
-    color(C.muted); love.graphics.setFont(state.fonts.tiny)
-    love.graphics.printf(formatText, 982 - formatWidth, 45, formatWidth, "center")
+    color(C.muted); love.graphics.setFont(state.fonts.upperSmall)
+    local formatY = 34 + (38 - state.fonts.upperSmall:getHeight()) / 2 - 1
+    love.graphics.printf(formatText, 982 - formatWidth, formatY, formatWidth, "center")
 
     draw_cover(track, 64, 190, 330, 0)
 
     local x, width = 438, 522
     color(C.text)
-    love.graphics.setFont(state.fonts.title)
-    love.graphics.print(truncate(track.title, state.fonts.title, width), x, 132)
+    love.graphics.setFont(state.fonts.upperTitle)
+    love.graphics.print(truncate(track.title, state.fonts.upperTitle, width), x, 124)
     color(C.muted)
-    love.graphics.setFont(state.fonts.body)
-    love.graphics.print(truncate(track.artist, state.fonts.body, width), x, 194)
-    love.graphics.setFont(state.fonts.small)
-    love.graphics.print(truncate(track.album, state.fonts.small, width), x, 228)
+    love.graphics.setFont(state.fonts.upperArtist)
+    love.graphics.print(truncate(track.artist, state.fonts.upperArtist, width), x, 194)
+    love.graphics.setFont(state.fonts.upperAlbum)
+    love.graphics.print(truncate(track.album, state.fonts.upperAlbum, width), x, 232)
 
-    glass_panel(x, 268, width, 340, 24, C.card, 0.48)
+    glass_panel(x, 272, width, 340, 24, C.card, 0.48)
     color(a)
-    love.graphics.setFont(state.fonts.label)
-    love.graphics.print("歌詞", x + 24, 276)
+    love.graphics.setFont(state.fonts.upperLabel)
+    love.graphics.print("歌詞", x + 24, 278)
     color(C.text)
     love.graphics.setFont(state.fonts.body)
     local current_lyric = current_lyric_index()
@@ -1456,15 +1458,15 @@ local function draw_upper()
             local entry = state.lyrics.lines[index]
             if entry then
                 local active = index == current_lyric
-                local line_y = 326 + offset * 56
+                local line_y = 330 + offset * 58
                 if active then
                     color(a, 0.11)
-                    love.graphics.rectangle("fill", x + 18, line_y - 6, width - 36, 36, 12, 12)
+                    love.graphics.rectangle("fill", x + 18, line_y - 9, width - 36, 46, 12, 12)
 
                 end
-                local text_x = active and x + 34 or x + 24
+                local text_x = active and x + 36 or x + 24
                 color(active and a or C.muted, active and 1 or 0.60)
-                love.graphics.setFont(active and state.fonts.body or state.fonts.small)
+                love.graphics.setFont(active and state.fonts.lyric or state.fonts.lyricSmall)
                 love.graphics.printf(entry.text, text_x, line_y, width - (text_x - x) - 24)
             end
         end
@@ -1477,7 +1479,7 @@ local function draw_upper()
     end
 
     color(C.muted)
-    love.graphics.setFont(state.fonts.small)
+    love.graphics.setFont(state.fonts.upperTime)
     love.graphics.print(fmt_time(state.position), x, 624)
     love.graphics.printf(fmt_time(state.duration), x, 624, width, "right")
     draw_progress(x, 660, width, 8, state.duration > 0 and state.position / state.duration or 0, a)
@@ -1550,7 +1552,7 @@ local function draw_library()
             end
             if right then
                 color(C.muted)
-                love.graphics.printf(right, r.x, r.y + 25, r.w - 18, "right")
+                love.graphics.printf(right, r.x, r.y + (r.h - state.fonts.small:getHeight()) / 2, r.w - 18, "right")
             end
             if iconStatus then
                 draw_list_status_icon(r.x + r.w - 36, r.y + r.h / 2, iconStatus)
@@ -1616,7 +1618,8 @@ local function draw_player_card()
         local loginAccent = accent()
         rounded_panel(x + 18, y + 16, w - 36, 42, {loginAccent[1], loginAccent[2], loginAccent[3], 0.10}, 18)
         color(C.text); love.graphics.setFont(state.fonts.track)
-        love.graphics.printf("扫码登录网易云", x + 20, y + 26, w - 40, "center")
+        local loginTitleY = y + 16 + (42 - state.fonts.track:getHeight()) / 2
+        love.graphics.printf("扫码登录网易云", x + 20, loginTitleY, w - 40, "center")
         color(C.muted); love.graphics.setFont(state.fonts.small)
         love.graphics.printf("使用手机网易云音乐扫描下方二维码", x + 20, y + 70, w - 40, "center")
         rounded_panel(x + 34, y + 120, 250, 252, C.card, 22)
@@ -1628,7 +1631,8 @@ local function draw_player_card()
         else
             rounded_panel(x + 39, y + 126, 240, 240, C.card2, 18)
             color(C.muted); love.graphics.setFont(state.fonts.body)
-            love.graphics.printf("二维码加载中...", x + 39, y + 226, 240, "center")
+            local qrTextY = y + 126 + (240 - state.fonts.body:getHeight()) / 2
+            love.graphics.printf("二维码加载中...", x + 39, qrTextY, 240, "center")
         end
         rounded_panel(x + 18, y + 416, w - 36, 48, C.card2, 18)
         color(accent()); love.graphics.setFont(state.fonts.label)
@@ -1653,7 +1657,9 @@ local function draw_player_card()
     local sa = accent()
     local statusWidth = state.fonts.tiny:getWidth(statusLabel) + 24
     rounded_panel(x + 18, y + 14, statusWidth, 30, {sa[1], sa[2], sa[3], 0.12}, 15)
-    color(sa); love.graphics.setFont(state.fonts.tiny); love.graphics.print(statusLabel, x + 30, y + 21)
+    color(sa); love.graphics.setFont(state.fonts.tiny)
+    local statusTextY = y + 14 + (30 - state.fonts.tiny:getHeight()) / 2
+    love.graphics.print(statusLabel, x + 30, statusTextY)
 
     color(C.text)
     love.graphics.setFont(state.fonts.track)
@@ -1730,7 +1736,8 @@ local function draw_lower()
     local footer = state.section == "online" and state.online.status or state.status
     glass_panel(34, 711, 956, 40, 20, C.card, 0.58)
     color(C.muted); love.graphics.setFont(footerFont)
-    love.graphics.print(truncate(footer, footerFont, 500), 52, 719)
+    local footerTextY = 711 + (40 - footerFont:getHeight()) / 2
+    love.graphics.print(truncate(footer, footerFont, 500), 52, footerTextY)
     local hints = {{"A", "选择"}, {"B", "返回"}, {"X", "播放"}, {"Y", "重试"}}
     local hint_region_x, hint_region_width = 560, 424
     local widths, hint_total = {}, 0
@@ -1901,11 +1908,18 @@ function love.load()
     end
     love.graphics.setBackgroundColor(C.bg)
     state.fontData = load_font_data()
-    state.fonts.small, state.fonts.tiny = make_font(16), make_font(13)
-    state.fonts.micro = make_font(11)
-    state.fonts.footer = make_font(14)
-    state.fonts.label, state.fonts.control = make_font(18), make_font(20)
+    state.fonts.small, state.fonts.tiny = make_font(20), make_font(18)
+    state.fonts.micro = make_font(14)
+    state.fonts.footer = make_font(19)
+    state.fonts.label, state.fonts.control = make_font(22), make_font(22)
     state.fonts.body, state.fonts.track = make_font(22), make_font(24)
+    state.fonts.lyric, state.fonts.lyricSmall = make_font(32), make_font(24)
+    state.fonts.upperSmall = make_font(22)
+    state.fonts.upperTitle = make_font(50)
+    state.fonts.upperArtist = make_font(26)
+    state.fonts.upperAlbum = make_font(23)
+    state.fonts.upperLabel = make_font(24)
+    state.fonts.upperTime = make_font(22)
     state.fonts.header, state.fonts.title = make_font(38), make_font(46)
     state.controls = require("controls")
     load_favorites()
