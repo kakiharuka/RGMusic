@@ -1655,11 +1655,13 @@ local function draw_player_card()
         buffering = "正在缓冲", playing = "正在播放", paused = "已暂停", failed = "播放失败"
     })[state.playbackState] or "等待播放"
     local sa = accent()
-    local statusWidth = state.fonts.tiny:getWidth(statusLabel) + 24
-    rounded_panel(x + 18, y + 14, statusWidth, 30, {sa[1], sa[2], sa[3], 0.12}, 15)
-    color(sa); love.graphics.setFont(state.fonts.tiny)
-    local statusTextY = y + 14 + (30 - state.fonts.tiny:getHeight()) / 2
-    love.graphics.print(statusLabel, x + 30, statusTextY)
+    if state.playbackState ~= "playing" and state.playbackState ~= "paused" then
+        local statusWidth = state.fonts.tiny:getWidth(statusLabel) + 24
+        rounded_panel(x + 18, y + 14, statusWidth, 30, {sa[1], sa[2], sa[3], 0.12}, 15)
+        color(sa); love.graphics.setFont(state.fonts.tiny)
+        local statusTextY = y + 14 + (30 - state.fonts.tiny:getHeight()) / 2
+        love.graphics.print(statusLabel, x + 30, statusTextY)
+    end
 
     color(C.text)
     love.graphics.setFont(state.fonts.track)
@@ -1713,15 +1715,6 @@ local function draw_lower()
         title = state.online.view == "tracks" and "网易云 · 歌单" or "网易云音乐"
     end
     color(C.text); love.graphics.setFont(state.fonts.header); love.graphics.print(title, 38, 34)
-    color(C.muted); love.graphics.setFont(state.fonts.small)
-    local count_text
-    if state.section == "local" then
-        count_text = state.scanActive and string.format("正在扫描 %d 首", state.scanCount) or string.format("%d 首歌曲", #state.tracks)
-        count_text = count_text .. "   ·  MP3 / OGG / WAV"
-    else
-        count_text = state.online.status
-    end
-    love.graphics.print(truncate(count_text, state.fonts.small, 560), 40, 84)
     rounded_panel(614, 32, 238, 54, C.card2, 27)
     state.sectionRects["local"] = {x = 620, y = 36, w = 108, h = 46}
     state.sectionRects.online = {x = 736, y = 36, w = 110, h = 46}
@@ -1734,6 +1727,14 @@ local function draw_lower()
     color(state.audioReady and accent() or C.accent2, 0.92)
     local footerFont = state.fonts.footer or state.fonts.tiny
     local footer = state.section == "online" and state.online.status or state.status
+    local activePlayback = state.playbackState == "playing" or state.playbackState == "paused"
+    if activePlayback or footer:find("正在播放", 1, true) or footer:find("已暂停", 1, true) then
+        if state.section == "local" or (state.online and state.online.view == "tracks") then
+            footer = string.format("%d 首歌曲", #state.tracks)
+        elseif state.section == "online" then
+            footer = "网易云音乐"
+        end
+    end
     glass_panel(34, 711, 956, 40, 20, C.card, 0.58)
     color(C.muted); love.graphics.setFont(footerFont)
     local footerTextY = 711 + (40 - footerFont:getHeight()) / 2
@@ -2032,6 +2033,7 @@ function love.update(dt)
                 else
                     state.online.status = "正在播放：" .. title
                 end
+                state.status = state.online.status
             end
 
             if status.eof and not state.mpvEofHandled then
